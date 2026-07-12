@@ -11,6 +11,7 @@ const session = require('./session');
 const { Runner } = require('./runner');
 const { isMasterPlan, readPointer } = require('./progress');
 const skills = require('./skills');
+const updater = require('./updater');
 
 const MODELS = ['(default)', 'fable', 'opus', 'sonnet', 'haiku'];
 const EFFORTS = ['(default)', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -185,6 +186,7 @@ function activate(context) {
   state.effort = context.workspaceState.get('planRunner.effort') || '(default)';
   state.mode = context.workspaceState.get('planRunner.mode') || 'auto';
   skillNote = installSkills(false); // install-if-missing on every activation
+  updater.start(context);           // poll GitHub Releases for a newer .vsix (D-003)
 
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusItem.command = 'planRunner.toggle';
