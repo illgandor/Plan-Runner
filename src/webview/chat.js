@@ -15,6 +15,10 @@
       <span class="spacer"></span>
       <span class="chip" id="ctx" hidden>ctx —</span>
     </div>
+    <div class="meter" id="meter" hidden>
+      <div class="gauge"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span></div>
+      <div class="gauge"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span></div>
+    </div>
     <div class="status" id="status">Idle</div>
     <div id="log"></div>
     <div class="composer">
@@ -135,10 +139,29 @@
       case 'step-started': system('▶ ' + (d.step || 'step')); cur = null; break;
       case 'step-done': system(`✔ ${d.from} → ${d.to}`); cur = null; break;
       case 'done': system('■ ' + (d.detail || d.state)); running = false; reflect(); break;
+      case 'usage': usage(d); break;
       case 'info': system(d.text); break;
       case 'attached': insertAtCursor($('input'), d.paths.map((p) => '@' + p).join(' ') + ' '); break;
     }
   });
+  // Usage meter. Snapshot already keeps last-good, so a null value = "no reading yet";
+  // never zero a painted bar (that's the anti-flicker rule from §Usage snapshot).
+  function usage(d) {
+    $('meter').hidden = false;
+    paintBar($('sbar'), $('spct'), d.session);
+    paintBar($('wbar'), $('wpct'), d.week);
+    const m = $('meter');
+    const over = d.max != null && d.max >= d.threshold;
+    const warn = d.max != null && d.max >= d.threshold - 10;
+    m.classList.toggle('over', over);
+    m.classList.toggle('warn', warn && !over);
+    m.classList.toggle('paused', !!d.paused); // hook painted by S08
+  }
+  function paintBar(bar, txt, v) {
+    if (v == null) return;            // keep last-good; never blank
+    bar.value = v; txt.textContent = v + '%';
+  }
+
   function fill(sel, items, chosen) {
     sel.innerHTML = '';
     (items || []).forEach((v) => { const o = document.createElement('option'); o.value = v; o.textContent = v; if (v === chosen) o.selected = true; sel.appendChild(o); });

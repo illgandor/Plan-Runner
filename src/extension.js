@@ -12,6 +12,7 @@ const { Runner } = require('./runner');
 const { isMasterPlan, readPointer } = require('./progress');
 const skills = require('./skills');
 const updater = require('./updater');
+const { UsageService } = require('./usage');
 
 const MODELS = ['(default)', 'fable', 'opus', 'sonnet', 'haiku'];
 const EFFORTS = ['(default)', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -20,6 +21,7 @@ const MODES = ['auto', 'acceptEdits', 'plan', 'manual'];
 let ctx = null;
 let view = null;        // the live WebviewView (null until the panel is opened)
 let runner = null;
+let usage = null;       // account-wide UsageService (one poller for the extension)
 let statusItem = null;
 let state = { enabled: false, model: '(default)', effort: '(default)', mode: 'auto' };
 let skillNote = null;   // one-line result of the on-activate skill install, shown in the panel
@@ -34,6 +36,8 @@ function project() {
   return { id: dir, path: dir, name: path.basename(dir), model: state.model, effort: state.effort, mode: state.mode };
 }
 function post(msg) { if (view) view.webview.postMessage(msg); }
+// Frozen §Webview⇄host shape. `paused` is painted by S08 — leave the field in place.
+function postUsage(s) { post({ kind: 'usage', session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: false, error: s.error }); }
 
 function updateStatusBar() {
   statusItem.text = `$(${state.enabled ? 'play-circle' : 'circle-slash'}) Plan Runner: ${state.enabled ? 'On' : 'Off'}`;
@@ -68,6 +72,7 @@ async function onMessage(m) {
     case 'ready':
       post({ kind: 'config', enabled: state.enabled, model: state.model, effort: state.effort, mode: state.mode,
         models: MODELS, efforts: EFFORTS, modes: MODES });
+      if (usage) postUsage(usage.snapshot()); // paint whatever's been read so far
       if (skillNote) post({ kind: 'info', text: skillNote });
       post({ kind: 'info', text: p ? `Workspace: ${p.name} — NEXT: ${readPointer(p.path) || '(none)'}` : 'Open a master-plan project folder to begin.' });
       break;
@@ -188,6 +193,11 @@ function activate(context) {
   skillNote = installSkills(false); // install-if-missing on every activation
   updater.start(context);           // poll GitHub Releases for a newer .vsix (D-003)
 
+  // Account-wide usage poller (threshold/pollSec default until S06 wires §Config).
+  usage = new UsageService();
+  usage.on('update', postUsage);
+  usage.start();
+
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusItem.command = 'planRunner.toggle';
   updateStatusBar();
@@ -206,6 +216,6 @@ function activate(context) {
   );
 }
 
-function deactivate() { runner?.stop(); }
+function deactivate() { runner?.stop(); usage?.stop(); }
 
 module.exports = { activate, deactivate };
