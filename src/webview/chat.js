@@ -141,6 +141,8 @@
       case 'step-done': system(`✔ ${d.from} → ${d.to}`); cur = null; break;
       case 'done': system('■ ' + (d.detail || d.state)); running = false; reflect(); break;
       case 'usage': usage(d); break;
+      case 'paused': setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
+      case 'resumed': setStatus({ state: 'running', detail: 'Resumed — usage dropped' }); break;
       case 'info': system(d.text); break;
       case 'attached': insertAtCursor($('input'), d.paths.map((p) => '@' + p).join(' ') + ' '); break;
     }

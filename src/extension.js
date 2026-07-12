@@ -41,8 +41,8 @@ function usageConfig() {
   const c = vscode.workspace.getConfiguration('planRunner');
   return { threshold: c.get('pauseThresholdPct', 90), pollSec: c.get('usagePollSeconds', 60) };
 }
-// Frozen §Webview⇄host shape. `paused` is painted by S08 — leave the field in place.
-function postUsage(s) { post({ kind: 'usage', session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: false, error: s.error }); }
+// Frozen §Webview⇄host shape. `paused` reflects the Runner holding on the usage gate (S08).
+function postUsage(s) { post({ kind: 'usage', session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error }); }
 
 function updateStatusBar() {
   statusItem.text = `$(${state.enabled ? 'play-circle' : 'circle-slash'}) Plan Runner: ${state.enabled ? 'On' : 'Off'}`;
@@ -63,10 +63,13 @@ function ensureRunner() {
   const p = project();
   if (!p) return null;
   runner = new Runner(p);
+  runner.usageGate = usage; // S08: crossing the threshold pauses/resumes the loop
   runner.on('status', (s) => post({ kind: 'status', ...s }));
   runner.on('step-started', (s) => post({ kind: 'step-started', ...s }));
   runner.on('step-done', (d) => post({ kind: 'step-done', ...d }));
   runner.on('done', (d) => post({ kind: 'done', ...d }));
+  runner.on('paused', (d) => { post({ kind: 'paused', reason: d.reason }); postUsage(usage.snapshot()); });
+  runner.on('resumed', () => { post({ kind: 'resumed' }); postUsage(usage.snapshot()); });
   return runner;
 }
 
@@ -207,7 +210,7 @@ function activate(context) {
 
   // Account-wide usage poller, seeded from application-scoped §Config (D-004).
   usage = new UsageService(usageConfig());
-  usage.on('update', postUsage);
+  usage.on('update', (s) => { if (runner) runner.onUsageUpdate(); postUsage(s); }); // S08: gate the loop, then repaint
   usage.start();
 
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
