@@ -111,6 +111,9 @@ function sdkOptions(cwd, options = {}) {
   // Reasoning effort ('low'|'medium'|'high'|'xhigh'|'max'). Models that don't support it
   // (e.g. haiku) silently downgrade, so it's safe to always pass when set.
   if (options.effort && options.effort !== '(default)') o.effort = options.effort;
+  // Resume a prior session by id (SDK options.resume) — how pause/resume re-enters the
+  // SAME step turn after an interrupt. Omitted when absent so a fresh step starts clean.
+  if (options.resume) o.resume = options.resume;
   return o;
 }
 
@@ -141,6 +144,10 @@ function denyPendingFor(id) {
 }
 
 const sessions = new Map(); // id -> { q, input, aborted }
+// Last init.session_id seen per project id. Persists across teardown so the Runner can
+// resume the SAME step after a fresh-context stop — captured BEFORE interrupt (Carryover).
+const sessionIds = new Map();
+function currentSessionId(id) { return sessionIds.get(id) || null; }
 
 // start({id,cwd,prompt,options}) → run query(), map+forward every message. hooks.send
 // overrides the sink (the Runner wraps it to watch for turn-end); hooks.onDone fires
@@ -161,7 +168,10 @@ function start({ id, cwd, prompt, options }, hooks = {}) {
       entry.q = q;
       for await (const m of q) {
         if (entry.aborted) break;
-        for (const msg of mapMessage(m)) send('session:message', { id, msg });
+        for (const msg of mapMessage(m)) {
+          if (msg.type === 'init' && msg.sessionId) sessionIds.set(id, msg.sessionId);
+          send('session:message', { id, msg });
+        }
       }
     } catch (e) {
       if (!entry.aborted) send('session:message', { id, msg: { type: 'error', message: String((e && e.message) || e) } });
@@ -199,5 +209,5 @@ function stop(id) {
   try { entry.q && entry.q.return && entry.q.return(); } catch { /* already ended */ }
 }
 
-module.exports = { start, send, chat, stop, interrupt, mapMessage, setQuery, getQuery, sdkOptions,
-  modeToPermission, resolvePermission, setSink, defaultSend, sessions };
+module.exports = { start, send, chat, stop, interrupt, currentSessionId, mapMessage, setQuery,
+  getQuery, sdkOptions, modeToPermission, resolvePermission, setSink, defaultSend, sessions };
