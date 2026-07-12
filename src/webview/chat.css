@@ -39,6 +39,9 @@ body {
 .meter.warn progress::-webkit-progress-value { background: var(--vscode-inputValidation-warningBorder, #d7a500); }
 .meter.over progress::-webkit-progress-value { background: var(--vscode-inputValidation-errorBorder, #be1100); }
 .meter.paused .glabel::after { content: ' ⏸'; }
+.meter .thresh { align-self: flex-end; opacity: .85; }
+.meter .thresh input { width: 42px; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; font-size: 11px; }
 
 .status { padding: 4px 10px; font-size: 12px; opacity: .85; border-bottom: 1px solid var(--vscode-panel-border); }
 .status.needs-you { color: var(--vscode-inputValidation-warningForeground, #d7a500); opacity: 1; font-weight: 600; }

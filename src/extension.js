@@ -36,6 +36,11 @@ function project() {
   return { id: dir, path: dir, name: path.basename(dir), model: state.model, effort: state.effort, mode: state.mode };
 }
 function post(msg) { if (view) view.webview.postMessage(msg); }
+// §Config keys — application-scoped, read the same in every window (D-004).
+function usageConfig() {
+  const c = vscode.workspace.getConfiguration('planRunner');
+  return { threshold: c.get('pauseThresholdPct', 90), pollSec: c.get('usagePollSeconds', 60) };
+}
 // Frozen §Webview⇄host shape. `paused` is painted by S08 — leave the field in place.
 function postUsage(s) { post({ kind: 'usage', session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: false, error: s.error }); }
 
@@ -118,6 +123,13 @@ async function onMessage(m) {
       state.mode = MODES.includes(m.value) ? m.value : 'auto';
       ctx.workspaceState.update('planRunner.mode', state.mode);
       break;
+    case 'setThreshold': {
+      // Write global config; onDidChangeConfiguration re-applies it here and in every window.
+      const v = Math.max(10, Math.min(100, Math.round(Number(m.value))));
+      if (Number.isFinite(v))
+        vscode.workspace.getConfiguration('planRunner').update('pauseThresholdPct', v, vscode.ConfigurationTarget.Global);
+      break;
+    }
     case 'attach': {
       // "Upload from computer": pick file(s); we hand Claude the path(s) as an @-reference
       // in the prompt — the agent Reads them with its filesystem tools (no upload needed
@@ -193,8 +205,8 @@ function activate(context) {
   skillNote = installSkills(false); // install-if-missing on every activation
   updater.start(context);           // poll GitHub Releases for a newer .vsix (D-003)
 
-  // Account-wide usage poller (threshold/pollSec default until S06 wires §Config).
-  usage = new UsageService();
+  // Account-wide usage poller, seeded from application-scoped §Config (D-004).
+  usage = new UsageService(usageConfig());
   usage.on('update', postUsage);
   usage.start();
 
@@ -213,6 +225,11 @@ function activate(context) {
     }),
     vscode.window.registerWebviewViewProvider('planRunner.chat', new ChatViewProvider(),
       { webviewOptions: { retainContextWhenHidden: true } }),
+    // Config is application-scoped: a write in ANY window fires this in EVERY window.
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('planRunner.pauseThresholdPct') || e.affectsConfiguration('planRunner.usagePollSeconds'))
+        usage.setConfig(usageConfig()); // re-applies + emits 'update' → postUsage repaints
+    }),
   );
 }
 

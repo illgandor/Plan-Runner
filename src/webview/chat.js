@@ -18,6 +18,7 @@
     <div class="meter" id="meter" hidden>
       <div class="gauge"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span></div>
       <div class="gauge"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span></div>
+      <label class="thresh" title="Pause the loop at this account-usage % (applies to all windows)">Pause @ <input id="thresh" type="number" min="10" max="100" step="1">%</label>
     </div>
     <div class="status" id="status">Idle</div>
     <div id="log"></div>
@@ -150,6 +151,8 @@
     $('meter').hidden = false;
     paintBar($('sbar'), $('spct'), d.session);
     paintBar($('wbar'), $('wpct'), d.week);
+    const t = $('thresh');
+    if (d.threshold != null && document.activeElement !== t) t.value = d.threshold; // don't fight the editor
     const m = $('meter');
     const over = d.max != null && d.max >= d.threshold;
     const warn = d.max != null && d.max >= d.threshold - 10;
@@ -190,6 +193,7 @@
   $('model').onchange = (e) => vscode.postMessage({ type: 'setModel', value: e.target.value });
   $('effort').onchange = (e) => vscode.postMessage({ type: 'setEffort', value: e.target.value });
   $('mode').onchange = (e) => vscode.postMessage({ type: 'setMode', value: e.target.value });
+  $('thresh').onchange = (e) => vscode.postMessage({ type: 'setThreshold', value: e.target.value });
   function send() {
     const ta = $('input'); const text = ta.value.trim();
     if (!text) return;

@@ -12,6 +12,19 @@
   "main": "./src/extension.js",
   "activationEvents": ["onView:planRunner.chat", "workspaceContains:PROGRESS.md"],
   "contributes": {
+    "configuration": {
+      "title": "Plan Runner",
+      "properties": {
+        "planRunner.pauseThresholdPct": {
+          "type": "number", "default": 90, "minimum": 10, "maximum": 100, "scope": "application",
+          "description": "Pause the loop when account usage reaches this % (applies to all windows)."
+        },
+        "planRunner.usagePollSeconds": {
+          "type": "number", "default": 60, "minimum": 10, "maximum": 3600, "scope": "application",
+          "description": "How often (seconds) to poll `claude /usage` for the meter."
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         { "id": "planRunner", "title": "Plan Runner", "icon": "media/icon.svg" }
