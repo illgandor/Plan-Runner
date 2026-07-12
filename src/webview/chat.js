@@ -38,7 +38,18 @@
   const toolEls = new Map();      // toolUseId -> tool <details> element
 
   // ---- Rendering helpers ----
+  const CAP = 4000;               // chars shown before a "show more" reveals the rest
   function scroll() { log.scrollTop = log.scrollHeight; }
+  // Fill el with text, but cap huge tool output behind a "show more" instead of silently truncating.
+  function setCapped(el, text) {
+    if (text.length <= CAP) { el.textContent = text; return; }
+    el.textContent = text.slice(0, CAP);
+    const more = document.createElement('button');
+    more.className = 'more';
+    more.textContent = `… show ${text.length - CAP} more`;
+    more.onclick = () => { el.textContent = text; };   // reveal full output (button replaced)
+    el.appendChild(more);
+  }
   function bubble(cls, text) {
     const el = document.createElement('div');
     el.className = 'msg ' + cls;
@@ -74,7 +85,7 @@
     const d = document.createElement('details'); d.className = 'tool';
     d.innerHTML = `<summary>🔧 <span class="tool-name"></span></summary><div class="tool-body"></div>`;
     d.querySelector('.tool-name').textContent = msg.name;
-    d.querySelector('.tool-body').textContent = JSON.stringify(msg.input || {}, null, 2);
+    setCapped(d.querySelector('.tool-body'), JSON.stringify(msg.input || {}, null, 2));
     el.appendChild(d);
     toolEls.set(msg.toolUseId, d);
     scroll();
@@ -84,7 +95,7 @@
     if (!d) return;
     const body = document.createElement('div');
     body.className = 'tool-body';
-    body.textContent = (msg.isError ? '⛔ ' : '') + String(msg.result || '').slice(0, 4000);
+    setCapped(body, (msg.isError ? '⛔ ' : '') + String(msg.result || ''));
     d.appendChild(body); scroll();
   }
 

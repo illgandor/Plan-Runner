@@ -22,13 +22,22 @@ the **same** session.
 
 ## Panel features
 
-Kept (useful): model selector, permission-mode selector, attach-a-file (hands Claude the
-path to read), MCP servers (loaded from your `~/.claude` config; button opens it),
-stop/interrupt, live context-token meter, streamed thinking + tool calls.
+Basics: model + permission-mode selector, attach-a-file (hands Claude the path to read),
+stop/interrupt, live context-token meter, streamed thinking + tool calls (long tool output
+collapses behind a **show more**).
 
-Left out on purpose (weight you don't need for autonomous runs): multi-project list,
-usage-limit gate, auto-updater, terminal/xterm, cost estimate. The official panel covers
-manual work.
+Five features that make the loop safe to leave running:
+
+- **Usage meter** — live Session and Week account-usage bars, read from `claude /usage`;
+  keeps the last good reading rather than blanking on a missing sample.
+- **Global pause threshold** — `Pause @ N%` applies to *every* window/project (VS Code
+  application-scoped setting), so one number governs all your autonomous runs.
+- **Mid-turn pause + auto-resume** — when usage crosses the threshold the current turn is
+  interrupted (session kept) and resumes automatically once usage drops back under.
+- **MCP button** — lists the servers in your `~/.claude` config with their last-init
+  status; authorize, add, remove, or reconnect them via `claude mcp`.
+- **Self-update** — polls GitHub Releases and side-loads a newer `.vsix` in place, then
+  prompts a reload (stock VS Code won't auto-update a side-loaded extension).
 
 ## Run it (development)
 
@@ -59,8 +68,9 @@ Code won't let a shipped extension default there; that's reserved for built-in c
 extensions. See PLAN.md.)
 
 **Update after code edits:** re-run the two commands (`--force` overwrites), Reload Window.
-No auto-update. It's a **Windows-only** build right now (the bundled `claude` binary is
-`win32-x64`).
+For released builds the panel **self-updates** — it polls GitHub Releases and offers to
+side-load the newer `.vsix`. It's a **Windows-only** build right now (the bundled `claude`
+binary is `win32-x64`).
 
 See [PLAN.md](PLAN.md) for architecture, the reuse map, decisions log, and the remaining
 work (chiefly: exercise the autonomous loop end-to-end on a live master-plan project).

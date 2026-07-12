@@ -58,6 +58,8 @@ details.think, details.tool { margin-top: 6px; font-size: 12px; opacity: .85; }
 details.think summary { cursor: pointer; opacity: .7; }
 .think-body, .tool-body { white-space: pre-wrap; margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--vscode-panel-border); }
 .tool-name { font-family: var(--vscode-editor-font-family, monospace); }
+.tool-body .more { display: block; margin-top: 4px; font: inherit; cursor: pointer; padding: 1px 6px;
+  color: var(--vscode-textLink-foreground); background: transparent; border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
 
 .perm {
   align-self: stretch; padding: 10px; border-radius: 8px;
