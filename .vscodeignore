@@ -4,3 +4,14 @@
 .vscode/**
 PLAN.md
 **/*.map
+# Planning system + vendored reference — never ship these in the .vsix
+planning/**
+reference/**
+test/**
+scripts/**
+PROGRESS.md
+SESSION_PROMPT.md
+OWNER_TODO.md
+CLAUDE.md
+.github/**
+*.vsix
