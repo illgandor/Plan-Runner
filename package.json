@@ -1,0 +1,43 @@
+{
+  "name": "plan-runner",
+  "displayName": "Plan Runner",
+  "version": "0.1.0",
+  "description": "An SDK chat panel that autonomously drives a master-plan project — one fresh Claude context window per step, right inside VS Code.",
+  "publisher": "notacult",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "repository": { "type": "git", "url": "https://github.com/illgandor/Plan-Runner" },
+  "main": "./src/extension.js",
+  "activationEvents": ["onView:planRunner.chat", "workspaceContains:PROGRESS.md"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "planRunner", "title": "Plan Runner", "icon": "media/icon.svg" }
+      ]
+    },
+    "views": {
+      "planRunner": [
+        { "type": "webview", "id": "planRunner.chat", "name": "Plan Runner" }
+      ]
+    },
+    "commands": [
+      { "command": "planRunner.toggle", "title": "Plan Runner: Toggle Auto-Run for this Workspace" },
+      { "command": "planRunner.start", "title": "Plan Runner: Start" },
+      { "command": "planRunner.stop", "title": "Plan Runner: Stop" },
+      { "command": "planRunner.installSkills", "title": "Plan Runner: Reinstall master-plan + next-step Skills" }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "echo 'no bundling yet — ships src + node_modules'",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.207"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0"
+  }
+}

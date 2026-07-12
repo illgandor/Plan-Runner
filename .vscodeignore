@@ -1,0 +1,6 @@
+# Keep the .vsix small — ship only what runs. node_modules is bundled by vsce because
+# the SDK (and its per-platform claude binary) must ship; don't ignore it.
+.gitignore
+.vscode/**
+PLAN.md
+**/*.map
