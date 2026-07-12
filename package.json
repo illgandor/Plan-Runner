@@ -31,7 +31,9 @@
   },
   "scripts": {
     "vscode:prepublish": "echo 'no bundling yet — ships src + node_modules'",
-    "package": "vsce package"
+    "package": "vsce package",
+    "check:syntax": "node scripts/check-syntax.js",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207"
