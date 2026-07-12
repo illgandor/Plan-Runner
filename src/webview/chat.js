@@ -191,7 +191,7 @@
   $('run').onclick = () => vscode.postMessage({ type: running ? 'stop' : 'start' });
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });
   $('attach').onclick = () => vscode.postMessage({ type: 'attach' });
-  $('mcp').onclick = () => vscode.postMessage({ type: 'openMcpConfig' });
+  $('mcp').onclick = () => vscode.postMessage({ type: 'openMcp' });
   $('model').onchange = (e) => vscode.postMessage({ type: 'setModel', value: e.target.value });
   $('effort').onchange = (e) => vscode.postMessage({ type: 'setEffort', value: e.target.value });
   $('mode').onchange = (e) => vscode.postMessage({ type: 'setMode', value: e.target.value });

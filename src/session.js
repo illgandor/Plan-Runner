@@ -148,6 +148,10 @@ const sessions = new Map(); // id -> { q, input, aborted }
 // resume the SAME step after a fresh-context stop — captured BEFORE interrupt (Carryover).
 const sessionIds = new Map();
 function currentSessionId(id) { return sessionIds.get(id) || null; }
+// Last-init MCP connection status per project id: { serverName: status }. Only fresh after
+// an init message; the MCP panel shows 'unknown' for anything not seen yet (S09 Carryover).
+const mcpStatusByProject = new Map();
+function mcpStatus(id) { return mcpStatusByProject.get(id) || {}; }
 
 // start({id,cwd,prompt,options}) → run query(), map+forward every message. hooks.send
 // overrides the sink (the Runner wraps it to watch for turn-end); hooks.onDone fires
@@ -170,6 +174,8 @@ function start({ id, cwd, prompt, options }, hooks = {}) {
         if (entry.aborted) break;
         for (const msg of mapMessage(m)) {
           if (msg.type === 'init' && msg.sessionId) sessionIds.set(id, msg.sessionId);
+          if (msg.type === 'init' && msg.mcpServers)
+            mcpStatusByProject.set(id, Object.fromEntries(msg.mcpServers.map((s) => [s.name, s.status])));
           send('session:message', { id, msg });
         }
       }
@@ -209,5 +215,5 @@ function stop(id) {
   try { entry.q && entry.q.return && entry.q.return(); } catch { /* already ended */ }
 }
 
-module.exports = { start, send, chat, stop, interrupt, currentSessionId, mapMessage, setQuery,
-  getQuery, sdkOptions, modeToPermission, resolvePermission, setSink, defaultSend, sessions };
+module.exports = { start, send, chat, stop, interrupt, currentSessionId, mcpStatus, mapMessage,
+  setQuery, getQuery, sdkOptions, modeToPermission, resolvePermission, setSink, defaultSend, sessions };

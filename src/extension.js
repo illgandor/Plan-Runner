@@ -5,9 +5,8 @@
 const vscode = require('vscode');
 const path = require('path');
 const crypto = require('crypto');
-const fs = require('fs');
-const os = require('os');
 const session = require('./session');
+const mcp = require('./mcp');
 const { Runner } = require('./runner');
 const { isMasterPlan, readPointer } = require('./progress');
 const skills = require('./skills');
@@ -141,13 +140,16 @@ async function onMessage(m) {
       if (picks && picks.length) post({ kind: 'attached', paths: picks.map((u) => u.fsPath) });
       break;
     }
-    case 'openMcpConfig': {
-      // MCP servers are loaded from the user's ~/.claude config via settingSources (the
-      // same ones the official CLI uses). Open that config so you can add/remove servers;
-      // they connect on the next session start.
-      const cfg = path.join(os.homedir(), '.claude.json');
-      if (fs.existsSync(cfg)) vscode.window.showTextDocument(vscode.Uri.file(cfg));
-      else vscode.window.showInformationMessage('Configure MCP servers with the `claude mcp` CLI (~/.claude.json not found yet).');
+    case 'openMcp': {
+      // Real MCP management: QuickPick of configured servers (~/.claude.json) + last-init
+      // status, with add/remove/auth via `claude mcp` and Reconnect = tear down the live
+      // session so the next turn/step re-inits and picks up config/auth changes.
+      await mcp.openMcp({
+        statusByName: p ? session.mcpStatus(p.id) : {},
+        reconnect: () => {
+          if (p) { session.stop(p.id); post({ kind: 'info', text: 'MCP: session reset — reconnects on the next run.' }); }
+        },
+      });
       break;
     }
   }
