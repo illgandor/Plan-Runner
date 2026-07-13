@@ -70,6 +70,10 @@ Follow `references/conversion-rules.md` exactly. The short version:
   **before** writing the steps that depend on them.
 - Owner-only work: pre-split into `a` (agent) / `b` (owner-gated) steps or
   route to OWNER_TODO — never a DoD box an agent can't check.
+- Public-facing website: P01-S01 is a password **preview gate** (full site built
+  behind it; public sees a holding page). Opening it to the public is its own
+  owner-gated launch step at the end. Details: `conversion-rules.md` §Website
+  preview gate.
 
 ## STEP 3 — Write the standard layout
 
@@ -123,5 +127,8 @@ Mode specifics:
 - `references/templates.md` — exact templates for every generated file.
 - `references/conversion-rules.md` — step grammar, sizing, decomposition rules,
   plan-close ritual, ADOPT migration, budgets rationale.
+- `references/preview-gate.md` — canonical password preview-gate implementation for
+  public-facing websites; copied into the project as `planning/reference/preview-gate.md`
+  and built as P01-S01 (see conversion-rules §Website preview gate).
 - `scripts/plan_check.py` — canonical checker; copy into each project's
   `planning/tools/` (refresh the copy on CHECK & REPAIR if the skill's is newer).

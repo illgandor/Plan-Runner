@@ -61,7 +61,8 @@ A **step** is the unit one fresh Claude Code session executes end-to-end.
    observable milestone gate.
 3. Slice milestones into steps under the grammar above. Number flat: P02-S01..
    S18 in execution order. Order so every `[deps:]` points backward; cross-plan
-   deps (`[deps: P01-S14]`) are legal, forward deps are not.
+   deps (`[deps: P01-S14]`) are legal, forward deps are not. For a public-facing
+   website, P01-S01 is the preview gate (see §Website preview gate).
 4. Write the estimates table (steps + est. sessions per milestone) and the cut
    order under pressure (what drops first; what is never cut).
 5. Self-lint before presenting: every step ≤40 lines with all 7 fields; DoD
@@ -73,6 +74,28 @@ A **step** is the unit one fresh Claude Code session executes end-to-end.
 7. Stamp the source draft's header:
    `> CONVERTED (date) → planning/plans/PLAN-NN-<slug>.md — do not execute from
    this file.` (DMGoblin's orphaned root plan is the anti-pattern.)
+
+## Website preview gate (public-facing web projects)
+
+If the project serves a public-facing website, the FIRST buildable step (P01-S01,
+before any feature work) puts the ENTIRE site behind a shared-password **preview
+gate**: holders of the preview password see the full site and can test it live as
+it's built; everyone else gets a minimal holding page and cannot reach the real
+routes. Reason: build every feature fully behind the gate so strangers can't
+stumble onto a half-built site and fiddle with it before launch.
+
+- The gate implementation is fully specified in `references/preview-gate.md` (one
+  shared preview password → session unlock → middleware in FRONT of all routes,
+  static assets excepted). **Copy that file into the generated project** as
+  `planning/reference/preview-gate.md`, and write P01-S01 to implement it — so the
+  building session reads the local spec and never has to reverse-engineer another
+  repo. Do NOT reproduce another site's branding: every visitor-facing string (name,
+  logo, tagline, copy) is this project's, filled in at build time.
+- Opening the gate to the public is its OWN explicit, **owner-gated** launch step at
+  the END of the plan (flip `previewGate.enabled` off) — never bundled into feature
+  work, so going live is a decision, not an accident.
+- Not a website / no public surface (CLI, library, internal tool, extension) → skip;
+  this rule is only for projects the public could reach.
 
 ## Plan-close ritual (when the active plan's last step flips ✅)
 

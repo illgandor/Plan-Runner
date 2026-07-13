@@ -4,7 +4,7 @@ description: >
   Execute exactly ONE step of a project on the master-plan planning system,
   end-to-end: read PROGRESS.md's ▶ NEXT STEP, load only that step's spec, verify
   the gate is green, implement it, then close out (commit, update PROGRESS.md,
-  run plan_check.py to exit 0). The execution counterpart to the master-plan
+  run plan_check.py to exit 0, push). The execution counterpart to the master-plan
   skill — it automates the SESSION_PROMPT.md protocol so you never hand-paste it.
   Use when the user says "next step," "do/run/work the next step," "continue the
   build," "execute the next planning step," "what's next on this project," or
@@ -63,8 +63,8 @@ Satisfy every Completion-criteria box and the Verify command — no more, no les
 
 ## STEP 5 — Close out (same invocation, in this order)
 1. **Commit** as `"<step-id>: <title>"`; narrative detail goes in the commit
-   body, nowhere else. Push only if the step says deploy — set any new env vars
-   FIRST, then verify the deploy. (No-git project: record the step ID + a
+   body, nowhere else. Deploy steps: set any new env vars FIRST, then verify the
+   deploy before continuing. (No-git project: record the step ID + a
    one-line summary in the session entry instead of committing.)
 2. **Update PROGRESS.md in one pass:** refresh the header `Updated:` line (date ·
    session · branch · HEAD — record HEAD as the **step's code commit** from 5.1,
@@ -82,7 +82,13 @@ Satisfy every Completion-criteria box and the Verify command — no more, no les
 5. **Commit the doc closeout** as a separate `planning: close out <step-id>`
    commit (keeps 5.1's step commit clean; matches the repo's `planning:`-prefixed
    convention). Do this after plan_check is green so the committed docs are the
-   verified ones. Leave the working tree clean at handoff. (Push only if 5.1 did.)
+   verified ones. Leave the working tree clean at handoff.
+6. **Push to the remote** if the repo has an upstream: `git push` the current
+   branch, **fast-forward only — never force**. This is a backup/sync so a step's
+   work can't strand on one machine and progress stays visible on the host; it is
+   NOT a deploy (going live stays gated to deploy steps, 5.1). No remote or no
+   upstream set → skip, and say so in the session entry's Handoff so the owner
+   can publish the branch deliberately.
 
 ## If the step overflows the window
 Reach a green sub-state, commit it, split the step in PROGRESS.md (`<id>a` ✅ +
