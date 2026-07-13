@@ -81,7 +81,7 @@ async function onMessage(m) {
         models: MODELS, efforts: EFFORTS, modes: MODES });
       if (usage) postUsage(usage.snapshot()); // paint whatever's been read so far
       if (skillNote) post({ kind: 'info', text: skillNote });
-      post({ kind: 'info', text: p ? `Workspace: ${p.name} — NEXT: ${readPointer(p.path) || '(none)'}` : 'Open a master-plan project folder to begin.' });
+      post({ kind: 'splash', text: p ? `Workspace: ${p.name} — NEXT: ${readPointer(p.path) || '(none)'}` : 'Open a master-plan project folder to begin.' });
       break;
     case 'start': {
       if (!p) { const msg = 'Open a project folder first.'; post({ kind: 'info', text: msg }); vscode.window.showWarningMessage(msg); break; }
@@ -183,7 +183,7 @@ function html(webview) {
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <link rel="stylesheet" href="${uri('chat.css')}">
   </head><body>
-    <div id="app"></div>
+    <div id="app" data-logo="${uri('logo.png')}"></div>
     <script nonce="${nonce}" src="${uri('chat.js')}"></script>
   </body></html>`;
 }

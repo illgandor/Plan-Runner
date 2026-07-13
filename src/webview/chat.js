@@ -33,6 +33,7 @@
 
   const $ = (id) => document.getElementById(id);
   const log = $('log');
+  const logoUri = app.dataset.logo || '';   // webview URI of src/webview/logo.png (from html())
   let enabled = false, running = false;
   let cur = null;                 // current assistant message element being streamed into
   const toolEls = new Map();      // toolUseId -> tool <details> element
@@ -58,6 +59,23 @@
     return el;
   }
   function system(text) { bubble('system', text); }
+  // First block in the log: Workspace/NEXT line + logo, in normal flow so chat pushes it off-screen.
+  function splash(text) {
+    let s = $('splash');
+    if (!s) {
+      s = document.createElement('div'); s.id = 'splash'; s.className = 'splash';
+      s.appendChild(document.createElement('div')).className = 'splash-line';
+      if (logoUri) {
+        const img = document.createElement('img');
+        img.className = 'splash-logo'; img.src = logoUri; img.alt = 'Plan Runner';
+        img.onerror = () => img.remove();          // asset missing → hide gracefully
+        s.appendChild(img);
+      }
+      log.insertBefore(s, log.firstChild);         // stays first even if messages arrived first
+    }
+    s.querySelector('.splash-line').textContent = text;
+    scroll();
+  }
 
   function ensureAssistant() {
     if (!cur) { cur = bubble('assistant', ''); cur.dataset.streamed = ''; }
@@ -155,6 +173,7 @@
       case 'paused': setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
       case 'resumed': setStatus({ state: 'running', detail: 'Resumed — usage dropped' }); break;
       case 'info': system(d.text); break;
+      case 'splash': splash(d.text); break;
       case 'attached': insertAtCursor($('input'), d.paths.map((p) => '@' + p).join(' ') + ' '); break;
     }
   });
