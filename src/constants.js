@@ -14,6 +14,7 @@ const ALLOWED_TOOLS = [
   'Bash(python:*)', 'Bash(python3:*)', 'Bash(py:*)',
   'Bash(cargo:*)', 'Bash(npm:*)', 'Bash(pnpm:*)', 'Bash(yarn:*)',
   'Bash(node:*)', 'Bash(npx:*)', 'Bash(pytest:*)', 'Bash(go:*)',
+  'Bash(codex:*)',  // Codex engine runs unattended (P02-S02); driven via `codex exec --json`.
   // Railway MCP auto-allowed so deploy/provision steps run hands-off. Stripe stays gated.
   'mcp__railway',
 ];
