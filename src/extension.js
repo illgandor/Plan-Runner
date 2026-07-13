@@ -6,6 +6,7 @@ const vscode = require('vscode');
 const path = require('path');
 const crypto = require('crypto');
 const session = require('./session');
+const engine = require('./engine');
 const mcp = require('./mcp');
 const { Runner } = require('./runner');
 const { isMasterPlan, readPointer } = require('./progress');
@@ -13,16 +14,18 @@ const skills = require('./skills');
 const updater = require('./updater');
 const { UsageService } = require('./usage');
 
-const MODELS = ['(default)', 'fable', 'opus', 'sonnet', 'haiku'];
-const EFFORTS = ['(default)', 'low', 'medium', 'high', 'xhigh', 'max'];
-const MODES = ['auto', 'acceptEdits', 'plan', 'manual'];
+// Claude capability lists now live in engine.js (single source of truth). Same values.
+const CLAUDE_CAPS = engine.capabilities('claude');
+const MODELS = CLAUDE_CAPS.models;
+const EFFORTS = CLAUDE_CAPS.efforts;
+const MODES = CLAUDE_CAPS.permissionModes.map((m) => m.value);
 
 let ctx = null;
 let view = null;        // the live WebviewView (null until the panel is opened)
 let runner = null;
 let usage = null;       // account-wide UsageService (one poller for the extension)
 let statusItem = null;
-let state = { enabled: false, model: '(default)', effort: '(default)', mode: 'auto' };
+let state = { enabled: false, engine: 'claude', model: '(default)', effort: '(default)', mode: 'auto' };
 let skillNote = null;   // one-line result of the on-activate skill install, shown in the panel
 
 function workspaceDir() {
@@ -32,7 +35,7 @@ function workspaceDir() {
 function project() {
   const dir = workspaceDir();
   if (!dir) return null;
-  return { id: dir, path: dir, name: path.basename(dir), model: state.model, effort: state.effort, mode: state.mode };
+  return { id: dir, path: dir, name: path.basename(dir), engine: state.engine, model: state.model, effort: state.effort, mode: state.mode };
 }
 function post(msg) { if (view) view.webview.postMessage(msg); }
 // §Config keys — application-scoped, read the same in every window (D-004).
@@ -104,11 +107,11 @@ async function onMessage(m) {
     case 'send':
       if (!p) return;
       if (runner && runner.running) runner.answer(m.text);        // continues the live step
-      else session.chat({ id: p.id, cwd: p.path, prompt: m.text,   // plain chat when not auto-running
+      else engine.provider(p.engine).chat({ id: p.id, cwd: p.path, prompt: m.text, // plain chat when not auto-running
         options: { model: state.model, effort: state.effort, permissionMode: state.mode } });
       break;
     case 'interrupt':
-      if (p) session.interrupt(p.id);
+      if (p) engine.provider(p.engine).interrupt(p.id);
       break;
     case 'permission':
       session.resolvePermission({ requestId: m.requestId, decision: m.decision });

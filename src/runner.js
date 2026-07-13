@@ -17,6 +17,7 @@ const { EventEmitter } = require('events');
 const { STEP_PROMPT } = require('./constants');
 const { readPointer } = require('./progress');
 const session = require('./session');
+const engine = require('./engine');
 
 const MAX_STEPS = 200; // hard safety cap per ON run
 // Resume prompt: must NOT re-run finished work (Carryover) — resume re-enters the same
@@ -43,6 +44,9 @@ class Runner extends EventEmitter {
     this._resumeId = null;   // session id captured at pause, replayed on resume
   }
   get id() { return this.project.id; }
+  // The provider for the project's engine (default 'claude'); lifecycle calls route here
+  // so selecting Codex (S06) drives it instead, with no other runner change (§Engine dispatch).
+  get _provider() { return engine.provider(this.project.engine || 'claude'); }
 
   start() {
     if (this.running) return;
@@ -57,7 +61,7 @@ class Runner extends EventEmitter {
   stop() {
     if (!this.running && !session.sessions.has(this.id)) return;
     this.stopRequested = true;
-    session.stop(this.id);
+    this._provider.stop(this.id);
     this._finish('idle', 'Stopped');
   }
 
@@ -108,7 +112,7 @@ class Runner extends EventEmitter {
     this._turnLive = true;
     const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode };
     if (resumeId) options.resume = resumeId;
-    session.start(
+    this._provider.start(
       { id: this.id, cwd: this.project.path, prompt, options },
       { send: (channel, payload) => {
           session.defaultSend(channel, payload); // → panel (render), same as v2's sdkDriver
@@ -129,7 +133,7 @@ class Runner extends EventEmitter {
     const after = readPointer(this.project.path);
     if (after && after !== stepId) {
       this.stepsRun++;
-      session.stop(this.id); // teardown -> guarantees a fresh context next step
+      this._provider.stop(this.id); // teardown -> guarantees a fresh context next step
       this.emit('step-done', { from: stepId, to: after });
       if (this.stopRequested) return this._finish('idle', `Stopped after ${stepId}`);
       return setImmediate(() => this._runNext());
@@ -153,10 +157,10 @@ class Runner extends EventEmitter {
   // Over threshold mid-turn: interrupt (stops the TURN, session id stays valid — D-005),
   // capturing the id BEFORE the interrupt so resume re-enters this exact session.
   _pause() {
-    this._resumeId = session.currentSessionId(this.id);
+    this._resumeId = this._provider.currentSessionId(this.id);
     this.paused = true;
     this._turnLive = false;
-    session.interrupt(this.id);
+    this._provider.interrupt(this.id);
     this.emit('paused', { reason: `Usage at/above threshold — paused ${this.currentStep}, resuming when it drops` });
   }
 
@@ -174,7 +178,7 @@ class Runner extends EventEmitter {
     this.needsYou = false;
     this._turnLive = true;
     this.emit('status', { state: 'running', step: this.currentStep, detail: `Continuing ${this.currentStep}…` });
-    session.chat({ id: this.id, cwd: this.project.path, prompt: text,
+    this._provider.chat({ id: this.id, cwd: this.project.path, prompt: text,
       options: { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode } });
   }
 }
