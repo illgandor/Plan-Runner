@@ -200,8 +200,13 @@ function chat({ id, cwd, prompt, options }) {
   else start({ id, cwd, prompt, options });
 }
 
+// q.interrupt()/q.return() are async — a sync try/catch misses their teardown rejections
+// ("Query closed before response received"), which then surface as an unhandled rejection
+// (crashes a plain-node driver; noisy in the extension host). Swallow sync throw + async reject.
+function settle(p) { try { p && typeof p.catch === 'function' && p.catch(() => {}); } catch { /* ignore */ } }
+
 // Interrupt the current turn without ending the session (the Stop button on a live turn).
-function interrupt(id) { try { sessions.get(id)?.q?.interrupt?.(); } catch { /* already ended */ } }
+function interrupt(id) { try { settle(sessions.get(id)?.q?.interrupt?.()); } catch { /* already ended */ } }
 
 // Abort + dispose the session for id (fresh-context teardown between steps).
 function stop(id) {
@@ -211,8 +216,8 @@ function stop(id) {
   sessions.delete(id);
   denyPendingFor(id);
   entry.input.close();
-  try { entry.q && entry.q.interrupt && entry.q.interrupt(); } catch { /* already ended */ }
-  try { entry.q && entry.q.return && entry.q.return(); } catch { /* already ended */ }
+  try { settle(entry.q && entry.q.interrupt && entry.q.interrupt()); } catch { /* already ended */ }
+  try { settle(entry.q && entry.q.return && entry.q.return()); } catch { /* already ended */ }
 }
 
 module.exports = { start, send, chat, stop, interrupt, currentSessionId, mcpStatus, mapMessage,
