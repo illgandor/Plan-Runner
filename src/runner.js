@@ -15,7 +15,7 @@
 // A generation counter invalidates stale callbacks from a torn-down step.
 const { EventEmitter } = require('events');
 const { execFileSync } = require('child_process');
-const { STEP_PROMPT } = require('./constants');
+const { STEP_PROMPT, MASTER_PLAN_PROMPT } = require('./constants');
 const { readPointer } = require('./progress');
 const session = require('./session');
 const engine = require('./engine');
@@ -67,6 +67,8 @@ class Runner extends EventEmitter {
     this.finalizeMs = FINALIZE_MS; // settle window before advancing to the next step (0 = off)
     this.finalizing = false; // true during the post-advance quiet window (session kept alive)
     this._finalizeTimer = null;
+    this._planSession = false; // true while the master-plan (PLAN COMPLETE) session is live (P02-S08)
+    this._advancedPlan = false; // guards master-plan to once per PLAN COMPLETE (a 2nd unchanged → finish)
     this.gitCheck = gitState;  // handoff guard; overridable in tests
   }
   get id() { return this.project.id; }
@@ -100,6 +102,8 @@ class Runner extends EventEmitter {
     this.paused = false;
     this.gating = false;
     this._turnLive = false;
+    this._planSession = false;
+    this._advancedPlan = false;
     this.currentStep = null;
     this.emit('status', { state, detail });
     this.emit('done', { state, detail });
@@ -112,7 +116,15 @@ class Runner extends EventEmitter {
     if (this.stepsRun >= MAX_STEPS) return this._finish('idle', 'Hit step cap — restart to continue');
     const next = readPointer(this.project.path);
     if (!next) return this._finish('error', 'No NEXT pointer / PROGRESS.md — not a master-plan project');
-    if (/^(PLAN COMPLETE|none)/i.test(next)) return this._finish('done', `Plan complete (${next})`);
+    if (/^none/i.test(next)) return this._finish('done', `Project complete (${next})`);
+    // Plan boundary: run master-plan ONCE to close/advance the plan (P02-S08), then re-read the
+    // pointer. If master-plan already ran and the pointer is still PLAN COMPLETE (unchanged),
+    // finish rather than loop. A pointer that names a step resets the guard (see _runStep).
+    if (/^PLAN COMPLETE/i.test(next)) {
+      if (this._advancedPlan) return this._finish('done', `Plan complete (${next})`);
+      this._advancedPlan = true;
+      return this._runMasterPlan();
+    }
     // Proactive gate: don't START a step while account usage is at/above threshold (port app gate).
     if (this._over()) {
       this.currentStep = next;
@@ -127,9 +139,22 @@ class Runner extends EventEmitter {
   _runStep(stepId) {
     this.needsYou = false;
     this.paused = false;
+    this._advancedPlan = false; // a real step to run → reset the master-plan-once guard
     this.emit('status', { state: 'running', step: stepId, detail: `Running ${stepId}` });
     this.emit('step-started', { step: stepId });
     this._startSession(stepId, STEP_PROMPT, null);
+  }
+
+  // Plan boundary (P02-S08): one FRESH session running the master-plan skill to close the
+  // finished plan and activate the queued one (or set NEXT: none). No settle window or git
+  // guard — those close out a STEP; on turn end we tear down and re-read the pointer (loop).
+  _runMasterPlan() {
+    this.needsYou = false;
+    this.paused = false;
+    this._planSession = true;
+    this.emit('status', { state: 'running', step: 'PLAN COMPLETE',
+      detail: 'Plan complete — running master-plan to close out and advance to the next plan' });
+    this._startSession('PLAN COMPLETE', MASTER_PLAN_PROMPT, null);
   }
 
   // Start (or resume) the SDK session for a step. resumeId → SDK options.resume, re-entering
@@ -159,6 +184,14 @@ class Runner extends EventEmitter {
   _onTurnEnd(stepId, gen) {
     if (gen !== this._gen || this.paused) return; // paused = interrupt ended the turn; keep the id to resume
     this._turnLive = false;
+    // Master-plan (PLAN COMPLETE) session ended: tear down for a fresh context, then re-read
+    // the pointer via _runNext — it names a new step (continue), 'none' (finish), or still
+    // PLAN COMPLETE with _advancedPlan set (finish, no re-run). No settle/git guard here.
+    if (this._planSession) {
+      this._planSession = false;
+      this._provider.stop(this.id);
+      return setImmediate(() => this._runNext());
+    }
     const after = readPointer(this.project.path);
     if (after && after !== stepId) return this._beginFinalize(stepId, gen); // work done → settle, then advance
     this.needsYou = true;

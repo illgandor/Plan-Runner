@@ -7,6 +7,15 @@ const STEP_PROMPT =
   'end-to-end (verify the gate, implement it, commit, update PROGRESS.md, get ' +
   'plan_check.py to exit 0), then STOP. Do not roll into the following step.';
 
+// Plan-boundary prompt (P02-S08). When PROGRESS.md's pointer reads "PLAN COMPLETE" the
+// runner runs this ONCE instead of stopping for the owner: master-plan closes the finished
+// plan and, if one is QUEUED, activates it and re-points NEXT at its first step (else NEXT:
+// none). The runner then re-reads the pointer and continues or finishes — no owner transition.
+const MASTER_PLAN_PROMPT =
+  'Use the master-plan skill to close out this completed plan. If another plan is QUEUED, ' +
+  'activate it as the new ACTIVE plan and point ▶ NEXT STEP at its first step; if no plan ' +
+  'remains, set NEXT: none. Then STOP.';
+
 // Tools the runner may use unattended. Anything outside this ASKS you in the panel
 // (see session.makeCanUseTool) instead of auto-denying — that's the "needs you" prompt.
 const ALLOWED_TOOLS = [
@@ -27,4 +36,4 @@ const POINTER_RE = /NEXT:\s*(.+)/;
 const ALLOWED_MODES = ['auto', 'acceptEdits', 'plan', 'manual'];
 const DEFAULT_MODE = 'auto';
 
-module.exports = { STEP_PROMPT, ALLOWED_TOOLS, POINTER_RE, ALLOWED_MODES, DEFAULT_MODE };
+module.exports = { STEP_PROMPT, MASTER_PLAN_PROMPT, ALLOWED_TOOLS, POINTER_RE, ALLOWED_MODES, DEFAULT_MODE };
