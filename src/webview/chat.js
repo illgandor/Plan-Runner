@@ -125,10 +125,7 @@
     if (channel !== 'session:message') return;
     const m = payload.msg;
     switch (m.type) {
-      case 'init':
-        if (m.mcpServers && m.mcpServers.length)
-          system('MCP: ' + m.mcpServers.map((s) => `${s.name} (${s.status})`).join(', '));
-        break;
+      case 'init': break; // MCP status lives in the 🔌 button now — no per-session/reply banner
       case 'text-delta': appendText(m.text); break;
       case 'assistant-text': if (cur && !cur.dataset.streamed) appendText(m.text); break; // streamed already? skip dupe
       case 'thinking': appendThinking(m.text); break;
