@@ -14,12 +14,34 @@
 //
 // A generation counter invalidates stale callbacks from a torn-down step.
 const { EventEmitter } = require('events');
+const { execFileSync } = require('child_process');
 const { STEP_PROMPT } = require('./constants');
 const { readPointer } = require('./progress');
 const session = require('./session');
 const engine = require('./engine');
 
+// Handoff guard between steps: a step is only closed out if its work is COMMITTED and (when
+// there's an upstream) PUSHED — the next-step skill does both at close-out. If the tree is
+// dirty or the branch is ahead, the session skipped/failed close-out; we must NOT advance
+// past stranded work (that's how P02-S05 got lost). Returns { clean, pushed }; a non-git repo
+// or no-upstream never blocks. Injected on the Runner so tests can stub it.
+function gitState(cwd) {
+  const git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  try {
+    const clean = git(['status', '--porcelain']) === '';
+    let pushed = true;
+    try { pushed = git(['rev-list', '--count', '@{u}..HEAD']) === '0'; } catch { pushed = true; } // no upstream → n/a
+    return { clean, pushed };
+  } catch { return { clean: true, pushed: true }; } // not a git repo → don't block
+}
+
 const MAX_STEPS = 200; // hard safety cap per ON run
+// After a step's turn ends AND the NEXT pointer advanced, the session may still be closing
+// out (commit → push → the "what I did" summary). Wait for this long of NO further activity
+// before teardown+advance, so an in-flight close-out isn't cut off and the summary stays on
+// screen for you. Any session message resets the timer; 0 disables (advance immediately).
+// Restored from the standalone's pty FINALIZE_IDLE_MS (2 min) for the SDK loop.
+const FINALIZE_MS = 120000;
 // Resume prompt: must NOT re-run finished work (Carryover) — resume re-enters the same
 // SDK session (options.resume), so its full history is already loaded.
 const RESUME_PROMPT =
@@ -42,6 +64,10 @@ class Runner extends EventEmitter {
     this.gating = false;     // true = between-steps hold (no live session yet)
     this._turnLive = false;  // true only while a step's turn is actively streaming
     this._resumeId = null;   // session id captured at pause, replayed on resume
+    this.finalizeMs = FINALIZE_MS; // settle window before advancing to the next step (0 = off)
+    this.finalizing = false; // true during the post-advance quiet window (session kept alive)
+    this._finalizeTimer = null;
+    this.gitCheck = gitState;  // handoff guard; overridable in tests
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -67,6 +93,8 @@ class Runner extends EventEmitter {
 
   _finish(state, detail) {
     this._gen++; // invalidate any in-flight step callbacks
+    clearTimeout(this._finalizeTimer);
+    this.finalizing = false;
     this.running = false;
     this.needsYou = false;
     this.paused = false;
@@ -119,6 +147,7 @@ class Runner extends EventEmitter {
           if (gen !== this._gen || channel !== 'session:message') return;
           const t = payload.msg.type;
           if (t === 'result' || t === 'error') this._onTurnEnd(stepId, gen);
+          else if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
         } }
     );
   }
@@ -131,15 +160,50 @@ class Runner extends EventEmitter {
     if (gen !== this._gen || this.paused) return; // paused = interrupt ended the turn; keep the id to resume
     this._turnLive = false;
     const after = readPointer(this.project.path);
-    if (after && after !== stepId) {
-      this.stepsRun++;
-      this._provider.stop(this.id); // teardown -> guarantees a fresh context next step
-      this.emit('step-done', { from: stepId, to: after });
-      if (this.stopRequested) return this._finish('idle', `Stopped after ${stepId}`);
-      return setImmediate(() => this._runNext());
-    }
+    if (after && after !== stepId) return this._beginFinalize(stepId, gen); // work done → settle, then advance
     this.needsYou = true;
     this.emit('status', { state: 'needs-you', step: stepId, detail: `${stepId}: waiting on you — answer in the panel` });
+  }
+
+  // Pointer advanced = the step's work is done, but close-out (commit/push/summary) may still
+  // be finishing. Hold the session ALIVE and wait finalizeMs of quiet before teardown, so the
+  // close-out can't be cut off and the summary stays readable. Stop or an answer cancels it.
+  _beginFinalize(stepId, gen) {
+    if (this.finalizeMs <= 0) return this._advance(stepId, gen);
+    this.finalizing = true;
+    const secs = Math.round(this.finalizeMs / 1000);
+    this.emit('status', { state: 'finalizing', step: stepId,
+      detail: `${stepId} done — settling ${secs}s for close-out (commit/push). Stop to hold here.` });
+    this._armFinalize(stepId, gen);
+  }
+  // (Re)arm the quiet timer; each session message calls this so the timer only fires once
+  // NOTHING has run for the full window (matches the standalone's byte-resets-the-timer rule).
+  _armFinalize(stepId, gen) {
+    clearTimeout(this._finalizeTimer);
+    this._finalizeTimer = setTimeout(() => this._advance(stepId, gen), this.finalizeMs);
+  }
+  // Quiet window elapsed (or disabled): teardown for a fresh context, then run the next step.
+  _advance(stepId, gen) {
+    if (gen !== this._gen) return; // torn down / stopped mid-window
+    this.finalizing = false;
+    // Handoff guard: never advance past a step whose work isn't committed + pushed. The
+    // session is kept ALIVE so you (or a reply) can tell it to finish close-out, after which
+    // the turn ends, the pointer is still advanced, and we settle → re-check → advance.
+    const g = this.gitCheck(this.project.path);
+    if (!g.clean || !g.pushed) {
+      this.needsYou = true;
+      const why = !g.clean ? 'uncommitted changes — the step never committed its work'
+                           : 'commits not pushed to the remote';
+      this.emit('status', { state: 'needs-you', step: stepId,
+        detail: `${stepId} ended but close-out is incomplete (${why}). Tell it to finish the commit/push, or Stop.` });
+      return;
+    }
+    this.stepsRun++;
+    const after = readPointer(this.project.path);
+    this._provider.stop(this.id); // teardown -> guarantees a fresh context next step
+    this.emit('step-done', { from: stepId, to: after });
+    if (this.stopRequested) return this._finish('idle', `Stopped after ${stepId}`);
+    return setImmediate(() => this._runNext());
   }
 
   // Driven by every UsageService 'update'. Threshold crossings pause/resume the loop:
@@ -176,6 +240,8 @@ class Runner extends EventEmitter {
   // if none is live, chat() starts one so the answer isn't lost.
   answer(text) {
     this.needsYou = false;
+    clearTimeout(this._finalizeTimer); // typing during the settle window holds it & continues the session
+    this.finalizing = false;
     this._turnLive = true;
     this.emit('status', { state: 'running', step: this.currentStep, detail: `Continuing ${this.currentStep}…` });
     this._provider.chat({ id: this.id, cwd: this.project.path, prompt: text,
@@ -183,4 +249,4 @@ class Runner extends EventEmitter {
   }
 }
 
-module.exports = { Runner, MAX_STEPS, RESUME_PROMPT };
+module.exports = { Runner, MAX_STEPS, RESUME_PROMPT, gitState };

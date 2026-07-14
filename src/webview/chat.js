@@ -163,7 +163,7 @@
         enabled = d.enabled; reflect(); break;
       case 'enabled': enabled = d.value; reflect(); break;
       case 'status':
-        setStatus(d); running = d.state === 'running' || d.state === 'needs-you'; reflect();
+        setStatus(d); running = d.state === 'running' || d.state === 'needs-you' || d.state === 'finalizing'; reflect();
         if (d.state === 'needs-you') { const el = ensureAssistant(); } // keep group open for the answer
         break;
       case 'step-started': system('▶ ' + (d.step || 'step')); cur = null; break;

@@ -41,7 +41,7 @@ function post(msg) { if (view) view.webview.postMessage(msg); }
 // §Config keys — application-scoped, read the same in every window (D-004).
 function usageConfig() {
   const c = vscode.workspace.getConfiguration('planRunner');
-  return { threshold: c.get('pauseThresholdPct', 90), pollSec: c.get('usagePollSeconds', 60) };
+  return { threshold: c.get('pauseThresholdPct', 90), pollSec: c.get('usagePollSeconds', 60), finalizeSec: c.get('finalizeQuietSeconds', 120) };
 }
 // Frozen §Webview⇄host shape. `paused` reflects the Runner holding on the usage gate (S08).
 function postUsage(s) { post({ kind: 'usage', session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error }); }
@@ -61,10 +61,11 @@ function setEnabled(v) {
 }
 
 function ensureRunner() {
-  if (runner) { runner.project = project(); return runner; } // pick up model/mode edits
+  if (runner) { runner.project = project(); runner.finalizeMs = usageConfig().finalizeSec * 1000; return runner; } // pick up edits
   const p = project();
   if (!p) return null;
   runner = new Runner(p);
+  runner.finalizeMs = usageConfig().finalizeSec * 1000; // settle window between steps (S: finalizeQuietSeconds)
   runner.usageGate = usage; // S08: crossing the threshold pauses/resumes the loop
   runner.on('status', (s) => post({ kind: 'status', ...s }));
   runner.on('step-started', (s) => post({ kind: 'step-started', ...s }));
@@ -237,6 +238,8 @@ function activate(context) {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('planRunner.pauseThresholdPct') || e.affectsConfiguration('planRunner.usagePollSeconds'))
         usage.setConfig(usageConfig()); // re-applies + emits 'update' → postUsage repaints
+      if (e.affectsConfiguration('planRunner.finalizeQuietSeconds') && runner)
+        runner.finalizeMs = usageConfig().finalizeSec * 1000; // live-apply the settle window
     }),
   );
 }

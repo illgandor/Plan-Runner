@@ -1,7 +1,7 @@
 {
   "name": "plan-runner",
   "displayName": "Plan Runner",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "An SDK chat panel that autonomously drives a master-plan project — one fresh Claude context window per step, right inside VS Code.",
   "publisher": "notacult",
   "license": "UNLICENSED",
@@ -22,6 +22,10 @@
         "planRunner.usagePollSeconds": {
           "type": "number", "default": 60, "minimum": 10, "maximum": 3600, "scope": "application",
           "description": "How often (seconds) to poll `claude /usage` for the meter."
+        },
+        "planRunner.finalizeQuietSeconds": {
+          "type": "number", "default": 120, "minimum": 0, "maximum": 600, "scope": "application",
+          "description": "After a step finishes, wait for this many seconds of no activity before starting the next step — gives the session time to commit/push and leaves its summary on screen. 0 = advance immediately."
         }
       }
     },
