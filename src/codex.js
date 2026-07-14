@@ -84,14 +84,51 @@ const ctx = new Map();       // id -> { cwd, options } (so send(id,text) can res
 function currentSessionId(id) { return threadIds.get(id) || null; }
 function mcpStatus() { return {}; } // codex reports no MCP status yet; keep the surface symmetric
 
-// ponytail: minimal flags — S05 (P02-S05) owns full model/effort lists + the permissionMode →
-// (--sandbox, --ask-for-approval) matrix (D-013). Here just the essentials to run a turn.
+// ── Capabilities (P02-S05) ──────────────────────────────────────────────────────
+// FULL capability, no dumbing down (D-011): every reasoning effort incl. xhigh, and the
+// permission matrix incl. Codex's own full-auto/full-access presets on top of the four
+// Claude-named modes §Engine defines. Model IDs are volatile — '(default)' always works and
+// lets Codex pick; the named ones are the current subscription models (extend when they change).
+const CODEX_MODELS = ['(default)', 'gpt-5-codex', 'gpt-5'];
+const CODEX_EFFORTS = ['(default)', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+
+// permissionMode → [sandbox_mode, approval_policy] (D-013: static policy, no live callback).
+// First four are §Engine's contract mapping; full-auto/full-access preserve Codex-only reach.
+const CODEX_PERMS = {
+  plan:          ['read-only',           'never'],
+  manual:        ['read-only',           'on-request'],
+  acceptEdits:   ['workspace-write',     'on-request'],
+  auto:          ['workspace-write',     'never'],
+  'full-auto':   ['workspace-write',     'on-failure'],
+  'full-access': ['danger-full-access',  'never'],
+};
+
+const CODEX_CAPS = {
+  models: CODEX_MODELS,
+  efforts: CODEX_EFFORTS,
+  permissionModes: [
+    { value: 'plan', label: 'plan (read-only)' },
+    { value: 'manual', label: 'manual (read-only · ask)' },
+    { value: 'acceptEdits', label: 'acceptEdits (workspace-write · ask)' },
+    { value: 'auto', label: 'auto (workspace-write)' },
+    { value: 'full-auto', label: 'full-auto (workspace-write · retry)' },
+    { value: 'full-access', label: 'full-access ⚠ (no sandbox)' },
+  ],
+};
+
+// mode → ['--sandbox', X, '--ask-for-approval', Y]; unknown/absent → [] (Codex uses its default).
+function permissionArgs(mode) {
+  const pair = CODEX_PERMS[mode];
+  return pair ? ['--sandbox', pair[0], '--ask-for-approval', pair[1]] : [];
+}
+
 function buildArgs(prompt, options = {}, resumeId) {
   const a = ['exec'];
   if (resumeId) a.push('resume', resumeId);
   a.push('--json', '--skip-git-repo-check');
   if (options.model && options.model !== '(default)') a.push('-m', options.model);
   if (options.effort && options.effort !== '(default)') a.push('-c', `model_reasoning_effort=${options.effort}`);
+  a.push(...permissionArgs(options.permissionMode));
   a.push(prompt);
   return a;
 }
@@ -196,4 +233,4 @@ function stop(id) {
 }
 
 module.exports = { start, send, chat, interrupt, stop, currentSessionId, mcpStatus,
-  mapCodexEvent, mapItem, buildArgs, defaultSend };
+  mapCodexEvent, mapItem, buildArgs, permissionArgs, CODEX_CAPS, defaultSend };
