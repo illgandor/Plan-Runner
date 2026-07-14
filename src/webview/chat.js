@@ -12,7 +12,6 @@
       <select id="model" title="Model"></select>
       <select id="effort" title="Reasoning effort"></select>
       <select id="mode" title="Permission mode"></select>
-      <button id="mcp" title="Configure MCP servers">MCP</button>
       <span class="spacer"></span>
       <span class="chip" id="ctx" hidden>ctx —</span>
     </div>
@@ -24,9 +23,11 @@
     <div class="status" id="status">Idle</div>
     <div id="log"></div>
     <div class="composer">
+      <div id="mcpmenu" class="mcpmenu" hidden></div>
       <textarea id="input" placeholder="Message Claude, or answer a step's question…"></textarea>
       <div class="row">
         <button id="attach" title="Attach a file (its path is handed to Claude to read)">📎 Attach</button>
+        <button id="mcp" title="MCP servers for the active engine">🔌 MCP</button>
         <button id="stop" title="Interrupt the current turn">■ Stop turn</button>
         <button id="send" class="send">Send</button>
       </div>
@@ -177,8 +178,40 @@
       case 'info': system(d.text); break;
       case 'splash': splash(d.text); break;
       case 'attached': insertAtCursor($('input'), d.paths.map((p) => '@' + p).join(' ') + ' '); break;
+      case 'mcp': renderMcp(d.engine, d.servers || []); break;
     }
   });
+
+  // ---- In-composer MCP popover (P02-S07): no modal; the active engine's servers + actions ----
+  function mcpAction(action, server) { vscode.postMessage({ type: 'mcpAction', action, server }); closeMcp(); }
+  function closeMcp() { $('mcpmenu').hidden = true; }
+  function renderMcp(eng, servers) {
+    const menu = $('mcpmenu');
+    menu.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'mcp-head'; head.textContent = `MCP servers — ${eng}`;
+    menu.appendChild(head);
+    if (!servers.length) {
+      const empty = document.createElement('div');
+      empty.className = 'mcp-empty'; empty.textContent = 'No MCP servers configured yet.';
+      menu.appendChild(empty);
+    }
+    servers.forEach((s) => {
+      const row = document.createElement('div'); row.className = 'mcp-row';
+      const name = document.createElement('span'); name.className = 'mcp-name'; name.textContent = s.name;
+      const stat = document.createElement('span'); stat.className = 'mcp-status'; stat.textContent = s.status || 'unknown';
+      const auth = document.createElement('button'); auth.textContent = 'Auth/status'; auth.onclick = () => mcpAction('get', s.name);
+      const rm = document.createElement('button'); rm.textContent = 'Remove'; rm.onclick = () => mcpAction('remove', s.name);
+      row.append(name, stat, auth, rm);
+      menu.appendChild(row);
+    });
+    const actions = document.createElement('div'); actions.className = 'mcp-actions';
+    [['Add server…', 'add'], ['Reconnect', 'reconnect'], ['Open config', 'open']].forEach(([label, action]) => {
+      const b = document.createElement('button'); b.textContent = label; b.onclick = () => mcpAction(action); actions.appendChild(b);
+    });
+    menu.appendChild(actions);
+    menu.hidden = false;
+  }
   // Usage meter. Snapshot already keeps last-good, so a null value = "no reading yet";
   // never zero a painted bar (that's the anti-flicker rule from §Usage snapshot).
   function usage(d) {
@@ -230,7 +263,11 @@
   $('run').onclick = () => vscode.postMessage({ type: running ? 'stop' : 'start' });
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });
   $('attach').onclick = () => vscode.postMessage({ type: 'attach' });
-  $('mcp').onclick = () => vscode.postMessage({ type: 'openMcp' });
+  $('mcp').onclick = () => {
+    if (!$('mcpmenu').hidden) return closeMcp();        // toggle closed
+    vscode.postMessage({ type: 'mcpList' });            // host replies with {kind:'mcp'} → renderMcp opens it
+  };
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMcp(); });
   $('engine').onchange = (e) => vscode.postMessage({ type: 'setEngine', value: e.target.value });
   $('model').onchange = (e) => vscode.postMessage({ type: 'setModel', value: e.target.value });
   $('effort').onchange = (e) => vscode.postMessage({ type: 'setEffort', value: e.target.value });

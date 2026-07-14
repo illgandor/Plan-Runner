@@ -173,16 +173,22 @@ async function onMessage(m) {
       if (picks && picks.length) post({ kind: 'attached', paths: picks.map((u) => u.fsPath) });
       break;
     }
-    case 'openMcp': {
-      // Real MCP management: QuickPick of configured servers (~/.claude.json) + last-init
-      // status, with add/remove/auth via `claude mcp` and Reconnect = tear down the live
-      // session so the next turn/step re-inits and picks up config/auth changes.
-      await mcp.openMcp({
-        statusByName: p ? session.mcpStatus(p.id) : {},
-        reconnect: () => {
-          if (p) { session.stop(p.id); post({ kind: 'info', text: 'MCP: session reset — reconnects on the next run.' }); }
-        },
-      });
+    case 'mcpList': {
+      // In-panel MCP popover (P02-S07): the active engine's servers + statuses. No modal —
+      // the webview renders the list and posts mcpAction for the buttons.
+      post({ kind: 'mcp', engine: state.engine, servers: mcp.servers(state.engine, p ? session.mcpStatus(p.id) : {}) });
+      break;
+    }
+    case 'mcpAction': {
+      // Actions from the popover, routed to the active engine's CLI/terminal. reconnect tears
+      // down the live session so the next turn/step re-inits and picks up config/auth changes.
+      const eng = state.engine;
+      if (m.action === 'reconnect') {
+        if (p) { engine.provider(eng).stop(p.id); post({ kind: 'info', text: 'MCP: session reset — reconnects on the next run.' }); }
+      } else if (m.action === 'open') mcp.openConfig(eng);
+      else if (m.action === 'add') mcp.runCli(eng, 'add');
+      else if (m.action === 'remove' && m.server) mcp.runCli(eng, `remove ${m.server}`);
+      else if (m.action === 'get' && m.server) mcp.runCli(eng, `get ${m.server}`);
       break;
     }
   }
