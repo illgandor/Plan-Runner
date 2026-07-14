@@ -14,11 +14,10 @@ const skills = require('./skills');
 const updater = require('./updater');
 const { UsageService } = require('./usage');
 
-// Claude capability lists now live in engine.js (single source of truth). Same values.
-const CLAUDE_CAPS = engine.capabilities('claude');
-const MODELS = CLAUDE_CAPS.models;
-const EFFORTS = CLAUDE_CAPS.efforts;
-const MODES = CLAUDE_CAPS.permissionModes.map((m) => m.value);
+// Capability lists live in engine.js (single source of truth). caps() gives the SELECTED
+// engine's models/efforts/permissionModes so the dropdowns and validation re-skin per engine.
+const ENGINES = ['claude', 'codex'];
+function caps() { return engine.capabilities(state.engine); }
 
 let ctx = null;
 let view = null;        // the live WebviewView (null until the panel is opened)
@@ -38,6 +37,13 @@ function project() {
   return { id: dir, path: dir, name: path.basename(dir), engine: state.engine, model: state.model, effort: state.effort, mode: state.mode };
 }
 function post(msg) { if (view) view.webview.postMessage(msg); }
+// Repopulate the webview's engine + model/effort/permission dropdowns for the current engine.
+function sendConfig() {
+  const c = caps();
+  post({ kind: 'config', enabled: state.enabled, engine: state.engine,
+    model: state.model, effort: state.effort, mode: state.mode,
+    engines: ENGINES, models: c.models, efforts: c.efforts, modes: c.permissionModes });
+}
 // §Config keys — application-scoped, read the same in every window (D-004).
 function usageConfig() {
   const c = vscode.workspace.getConfiguration('planRunner');
@@ -81,8 +87,7 @@ async function onMessage(m) {
   const p = project();
   switch (m.type) {
     case 'ready':
-      post({ kind: 'config', enabled: state.enabled, model: state.model, effort: state.effort, mode: state.mode,
-        models: MODELS, efforts: EFFORTS, modes: MODES });
+      sendConfig();
       if (usage) postUsage(usage.snapshot()); // paint whatever's been read so far
       if (skillNote) post({ kind: 'info', text: skillNote });
       post({ kind: 'splash', text: p ? `Workspace: ${p.name} — NEXT: ${readPointer(p.path) || '(none)'}` : 'Open a master-plan project folder to begin.' });
@@ -117,18 +122,42 @@ async function onMessage(m) {
     case 'permission':
       session.resolvePermission({ requestId: m.requestId, decision: m.decision });
       break;
-    case 'setModel':
-      state.model = MODELS.includes(m.value) ? m.value : '(default)';
+    case 'setEngine': {
+      const next = ENGINES.includes(m.value) ? m.value : 'claude';
+      if (next === 'codex' && !require('./codex-path').findCodex()) {
+        // Codex not installed: don't switch — tell the user and snap the dropdown back to Claude.
+        post({ kind: 'info', text: 'Codex CLI not found. Install it and run `codex login`, then pick Codex again.' });
+        sendConfig();
+        break;
+      }
+      state.engine = next;
+      ctx.workspaceState.update('planRunner.engine', state.engine);
+      // Drop selections the new engine can't offer back to its default (first item).
+      const c = caps();
+      if (!c.models.includes(state.model)) { state.model = c.models[0]; ctx.workspaceState.update('planRunner.model', state.model); }
+      if (!c.efforts.includes(state.effort)) { state.effort = c.efforts[0]; ctx.workspaceState.update('planRunner.effort', state.effort); }
+      if (!c.permissionModes.some((pm) => pm.value === state.mode)) { state.mode = c.permissionModes[0].value; ctx.workspaceState.update('planRunner.mode', state.mode); }
+      sendConfig(); // repopulate all four dropdowns for the new engine
+      break;
+    }
+    case 'setModel': {
+      const models = caps().models;
+      state.model = models.includes(m.value) ? m.value : models[0];
       ctx.workspaceState.update('planRunner.model', state.model);
       break;
-    case 'setEffort':
-      state.effort = EFFORTS.includes(m.value) ? m.value : '(default)';
+    }
+    case 'setEffort': {
+      const efforts = caps().efforts;
+      state.effort = efforts.includes(m.value) ? m.value : efforts[0];
       ctx.workspaceState.update('planRunner.effort', state.effort);
       break;
-    case 'setMode':
-      state.mode = MODES.includes(m.value) ? m.value : 'auto';
+    }
+    case 'setMode': {
+      const modes = caps().permissionModes.map((pm) => pm.value);
+      state.mode = modes.includes(m.value) ? m.value : modes[0];
       ctx.workspaceState.update('planRunner.mode', state.mode);
       break;
+    }
     case 'setThreshold': {
       // Write global config; onDidChangeConfiguration re-applies it here and in every window.
       const v = Math.max(10, Math.min(100, Math.round(Number(m.value))));
@@ -208,6 +237,7 @@ function installSkills(force) {
 function activate(context) {
   ctx = context;
   state.enabled = !!context.workspaceState.get('planRunner.enabled');
+  state.engine = ENGINES.includes(context.workspaceState.get('planRunner.engine')) ? context.workspaceState.get('planRunner.engine') : 'claude';
   state.model = context.workspaceState.get('planRunner.model') || '(default)';
   state.effort = context.workspaceState.get('planRunner.effort') || '(default)';
   state.mode = context.workspaceState.get('planRunner.mode') || 'auto';

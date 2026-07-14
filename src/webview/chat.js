@@ -8,6 +8,7 @@
   app.innerHTML = `
     <div class="bar">
       <button id="run" class="primary">▶ Start</button>
+      <select id="engine" title="Engine"></select>
       <select id="model" title="Model"></select>
       <select id="effort" title="Reasoning effort"></select>
       <select id="mode" title="Permission mode"></select>
@@ -159,6 +160,7 @@
     if (d.channel) return onSession(d.channel, d.payload);
     switch (d.kind) {
       case 'config':
+        fill($('engine'), d.engines, d.engine);
         fill($('model'), d.models, d.model); fill($('effort'), d.efforts, d.effort); fill($('mode'), d.modes, d.mode);
         enabled = d.enabled; reflect(); break;
       case 'enabled': enabled = d.value; reflect(); break;
@@ -197,9 +199,16 @@
     bar.value = v; txt.textContent = v + '%';
   }
 
+  // items are plain strings (model/effort/engine) OR {value,label} objects (permission modes).
   function fill(sel, items, chosen) {
     sel.innerHTML = '';
-    (items || []).forEach((v) => { const o = document.createElement('option'); o.value = v; o.textContent = v; if (v === chosen) o.selected = true; sel.appendChild(o); });
+    (items || []).forEach((it) => {
+      const val = typeof it === 'string' ? it : it.value;
+      const o = document.createElement('option');
+      o.value = val; o.textContent = typeof it === 'string' ? it : it.label;
+      if (val === chosen) o.selected = true;
+      sel.appendChild(o);
+    });
   }
   function setStatus(d) {
     const s = $('status'); s.textContent = d.detail || d.state;
@@ -222,6 +231,7 @@
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });
   $('attach').onclick = () => vscode.postMessage({ type: 'attach' });
   $('mcp').onclick = () => vscode.postMessage({ type: 'openMcp' });
+  $('engine').onchange = (e) => vscode.postMessage({ type: 'setEngine', value: e.target.value });
   $('model').onchange = (e) => vscode.postMessage({ type: 'setModel', value: e.target.value });
   $('effort').onchange = (e) => vscode.postMessage({ type: 'setEffort', value: e.target.value });
   $('mode').onchange = (e) => vscode.postMessage({ type: 'setMode', value: e.target.value });
