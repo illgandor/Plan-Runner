@@ -158,12 +158,22 @@ function handleLine(id, entry, line, send) {
   }
 }
 
+// SIGINT doesn't reliably kill codex.exe or its child tree on Windows (hung turns pile up),
+// so terminate the whole tree with `taskkill /T /F` on win32; POSIX falls back to SIGKILL.
+function killChild(child) {
+  if (!child || child.pid == null) return;
+  if (process.platform === 'win32') {
+    try { spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true }); return; } catch { /* fall through */ }
+  }
+  try { child.kill('SIGKILL'); } catch { /* already gone */ }
+}
+
 function killLive(id) {
   const e = live.get(id);
   if (!e) return;
   e.aborted = true;
   live.delete(id);
-  try { e.child.kill('SIGINT'); } catch { /* already gone */ }
+  killChild(e.child);
 }
 
 // Spawn ONE codex turn (fresh or a resume) and stream its JSONL through `send`.
@@ -177,7 +187,11 @@ function spawnTurn(id, cwd, prompt, options, resumeId, send, onDone) {
     return;
   }
   let child;
-  try { child = spawn(bin, buildArgs(prompt, options, resumeId), { cwd, windowsHide: true }); }
+  // stdio stdin='ignore' (closed): `codex exec` with a prompt arg AND a piped-open stdin reads
+  // stdin as an extra `<stdin>` block and BLOCKS on EOF forever (cli >=0.144) — the turn hangs
+  // with no output. Closing stdin makes it run the argv prompt and stream normally. Same fix
+  // usage.js uses for `claude -p`. (Fixes: Start on Codex shows the step then nothing streams.)
+  try { child = spawn(bin, buildArgs(prompt, options, resumeId), { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch (e) {
     send('session:message', { id, msg: { type: 'error', message: String((e && e.message) || e) } });
     onDone && onDone();
@@ -230,7 +244,7 @@ function chat({ id, cwd, prompt, options = {} }) {
 // Interrupt the live turn (usage-pause) — the thread id stays, so we can resume the same step.
 function interrupt(id) {
   const e = live.get(id);
-  if (e && e.child) { try { e.child.kill('SIGINT'); } catch { /* already ended */ } }
+  if (e && e.child) killChild(e.child); // tree-kill; the thread id persists for resume
 }
 
 // Teardown between steps: kill the turn AND drop the thread id so the next step starts fresh.
