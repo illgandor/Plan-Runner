@@ -18,6 +18,7 @@
     <div class="meter" id="meter" hidden>
       <div class="gauge"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span></div>
       <div class="gauge"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span></div>
+      <div class="gauge tokrow" id="tokrow" hidden title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
       <label class="thresh" title="Pause the loop at this account-usage % (applies to all windows)">Pause @ <input id="thresh" type="number" min="10" max="100" step="1">%</label>
     </div>
     <div class="status" id="status">Idle</div>
@@ -37,6 +38,7 @@
   const log = $('log');
   const logoUri = app.dataset.logo || '';   // webview URI of src/webview/logo.png (from html())
   let enabled = false, running = false;
+  let sessionTokens = 0;          // Codex: running total of tokens processed this run (no usage % source)
   let cur = null;                 // current assistant message element being streamed into
   const toolEls = new Map();      // toolUseId -> tool <details> element
 
@@ -133,6 +135,7 @@
       case 'tool-result': toolResult(m); break;
       case 'result':
         if (m.contextTokens) { const c = $('ctx'); c.hidden = false; c.textContent = 'ctx ' + fmt(m.contextTokens); }
+        if (m.turnTokens) { sessionTokens += m.turnTokens; $('tokval').textContent = fmt(sessionTokens); } // Codex counter
         cur = null; toolEls.clear();               // finalize this turn's group
         break;
       case 'error': bubble('error', m.message || 'Error'); cur = null; break;
@@ -213,21 +216,32 @@
   // never zero a painted bar (that's the anti-flicker rule from §Usage snapshot).
   function usage(d) {
     $('meter').hidden = false;
-    paintBar($('sbar'), $('spct'), d.session);
-    paintBar($('wbar'), $('wpct'), d.week);
+    const codex = d.engine === 'codex';
+    $('tokrow').hidden = !codex;      // the token counter shows on Codex only
+    const m = $('meter');
+    if (codex) {
+      // Codex has no account usage % — show N/A instead of the stale Claude reading, and
+      // surface the token counter. The pause-gate is inert on Codex, so no over/warn/paused.
+      naBar($('sbar'), $('spct')); naBar($('wbar'), $('wpct'));
+      $('tokval').textContent = sessionTokens ? fmt(sessionTokens) : '—';
+      m.classList.remove('over', 'warn', 'paused');
+      m.classList.add('codex');
+    } else {
+      m.classList.remove('codex');
+      paintBar($('sbar'), $('spct'), d.session);
+      paintBar($('wbar'), $('wpct'), d.week);
+      m.classList.toggle('over', d.max != null && d.max >= d.threshold);
+      m.classList.toggle('warn', d.max != null && d.max >= d.threshold - 10 && d.max < d.threshold);
+      m.classList.toggle('paused', !!d.paused); // hook painted by S08
+    }
     const t = $('thresh');
     if (d.threshold != null && document.activeElement !== t) t.value = d.threshold; // don't fight the editor
-    const m = $('meter');
-    const over = d.max != null && d.max >= d.threshold;
-    const warn = d.max != null && d.max >= d.threshold - 10;
-    m.classList.toggle('over', over);
-    m.classList.toggle('warn', warn && !over);
-    m.classList.toggle('paused', !!d.paused); // hook painted by S08
   }
   function paintBar(bar, txt, v) {
     if (v == null) return;            // keep last-good; never blank
     bar.value = v; txt.textContent = v + '%';
   }
+  function naBar(bar, txt) { bar.value = 0; txt.textContent = 'N/A'; } // Codex: no % source
 
   // items are plain strings (model/effort/engine) OR {value,label} objects (permission modes).
   function fill(sel, items, chosen) {

@@ -109,7 +109,9 @@ class Runner extends EventEmitter {
     this.emit('done', { state, detail });
   }
 
-  _over() { return !!(this.usageGate && this.usageGate.isOverThreshold()); }
+  // The usage gate polls CLAUDE account usage; it's meaningless for a Codex run (different
+  // account, no source), so never pause a Codex step on it. (Codex usage % is N/A — see the panel.)
+  _over() { return (this.project.engine || 'claude') !== 'codex' && !!(this.usageGate && this.usageGate.isOverThreshold()); }
 
   _runNext() {
     if (this.stopRequested) return this._finish('idle', 'Stopped');

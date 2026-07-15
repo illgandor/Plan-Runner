@@ -63,10 +63,10 @@ test('mcp_tool_call: started → tool-use (server.tool), completed(failed) → e
   assert.strictEqual(out[0].result, 'nope');
 });
 
-test('turn.completed → result (the step-done signal the Runner keys on), context = input_tokens', () => {
+test('turn.completed → result (step-done signal), context = input_tokens, turnTokens = input+output', () => {
   const evt = { type: 'turn.completed', usage: { input_tokens: 26442, cached_input_tokens: 22016, output_tokens: 83 } };
   assert.deepStrictEqual(mapCodexEvent(evt),
-    [{ type: 'result', subtype: 'success', text: '', costUsd: null, contextTokens: 26442 }]);
+    [{ type: 'result', subtype: 'success', text: '', costUsd: null, contextTokens: 26442, turnTokens: 26525 }]);
 });
 
 test('turn.failed / error → error event', () => {

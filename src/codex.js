@@ -61,8 +61,12 @@ function mapCodexEvent(evt) {
       // Context fill to watch grow = the turn's full prompt size. Codex's input_tokens already
       // INCLUDES cached tokens (unlike Claude's split fields), so it IS the number to show.
       const u = evt.usage || {};
+      // turnTokens = total tokens processed this turn (input incl. cached + output). The panel
+      // accumulates it into a Codex "tokens this run" readout, since Codex exposes no account
+      // usage % (no `claude /usage` equivalent) — the meter shows N/A % + this counter instead.
       return [{ type: 'result', subtype: 'success', text: '', costUsd: null,
-        contextTokens: u.input_tokens || null }];
+        contextTokens: u.input_tokens || null,
+        turnTokens: ((u.input_tokens || 0) + (u.output_tokens || 0)) || null }];
     }
     case 'turn.failed':
     case 'error':

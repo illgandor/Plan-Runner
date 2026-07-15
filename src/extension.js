@@ -50,7 +50,7 @@ function usageConfig() {
   return { threshold: c.get('pauseThresholdPct', 90), pollSec: c.get('usagePollSeconds', 60), finalizeSec: c.get('finalizeQuietSeconds', 120) };
 }
 // Frozen §Webview⇄host shape. `paused` reflects the Runner holding on the usage gate (S08).
-function postUsage(s) { post({ kind: 'usage', session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error }); }
+function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error }); }
 
 function updateStatusBar() {
   statusItem.text = `$(${state.enabled ? 'play-circle' : 'circle-slash'}) Plan Runner: ${state.enabled ? 'On' : 'Off'}`;
@@ -138,6 +138,10 @@ async function onMessage(m) {
       if (!c.efforts.includes(state.effort)) { state.effort = c.efforts[0]; ctx.workspaceState.update('planRunner.effort', state.effort); }
       if (!c.permissionModes.some((pm) => pm.value === state.mode)) { state.mode = c.permissionModes[0].value; ctx.workspaceState.update('planRunner.mode', state.mode); }
       sendConfig(); // repopulate all four dropdowns for the new engine
+      // Codex exposes no account usage — stop the Claude poller (this window only) and repaint
+      // the meter as N/A; Claude resumes it. Per-window: never touches another window's poller.
+      if (state.engine === 'codex') usage.stop(); else usage.start();
+      postUsage(usage.snapshot());
       break;
     }
     case 'setModel': {
@@ -254,7 +258,7 @@ function activate(context) {
   // Account-wide usage poller, seeded from application-scoped §Config (D-004).
   usage = new UsageService(usageConfig());
   usage.on('update', (s) => { if (runner) runner.onUsageUpdate(); postUsage(s); }); // S08: gate the loop, then repaint
-  usage.start();
+  if (state.engine !== 'codex') usage.start(); // Codex has no usage source — don't poll Claude for it
 
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusItem.command = 'planRunner.toggle';

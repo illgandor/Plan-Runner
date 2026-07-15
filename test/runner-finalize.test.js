@@ -57,6 +57,16 @@ test('pointer advanced → holds for finalizeMs, then tears down + emits step-do
   } finally { restore(); }
 });
 
+test('usage gate is inert on Codex — never pauses a Codex run on Claude usage', () => {
+  const over = { isOverThreshold: () => true };
+  const codex = new Runner({ id: 'c', path: '.', engine: 'codex', model: '(default)', effort: '(default)', mode: 'auto' });
+  codex.usageGate = over;
+  assert.equal(codex._over(), false, 'Codex must ignore the Claude usage gate');
+  const claude = new Runner({ id: 'd', path: '.', engine: 'claude', model: '(default)', effort: '(default)', mode: 'auto' });
+  claude.usageGate = over;
+  assert.equal(claude._over(), true, 'Claude still gates on usage');
+});
+
 test('finalizeMs=0 disables the window — advances immediately', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'setImmediate'] });
   const p = tempProject('S1');
