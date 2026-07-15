@@ -119,7 +119,11 @@ const CODEX_CAPS = {
 // mode → ['--sandbox', X, '--ask-for-approval', Y]; unknown/absent → [] (Codex uses its default).
 function permissionArgs(mode) {
   const pair = CODEX_PERMS[mode];
-  return pair ? ['--sandbox', pair[0], '--ask-for-approval', pair[1]] : [];
+  // `--sandbox` is valid on `codex exec`, but `-a/--ask-for-approval` is a TOP-LEVEL flag only
+  // (codex-cli >=0.144 rejects it after `exec`). So pass approval as a `-c approval_policy=` config
+  // override — same mechanism buildArgs already uses for model_reasoning_effort. (Fixes the
+  // "unexpected argument '--ask-for-approval'" error on Start.)
+  return pair ? ['--sandbox', pair[0], '-c', `approval_policy=${pair[1]}`] : [];
 }
 
 function buildArgs(prompt, options = {}, resumeId) {

@@ -1,6 +1,6 @@
 // Codex capabilities + full-capability flag mapping (P02-S05). CODEX_CAPS feeds the dropdowns
 // (via engine.capabilities('codex')); permissionArgs/buildArgs turn a mode into the real
-// `--sandbox`/`--ask-for-approval` pair. Full capability, no dumbing down (D-011/D-013).
+// `--sandbox` flag + `-c approval_policy=` override. Full capability, no dumbing down (D-011/D-013).
 // Stdlib only, spends no usage.
 const test = require('node:test');
 const assert = require('node:assert');
@@ -30,12 +30,12 @@ test('permissionModes cover the four contract modes PLUS full-auto/full-access (
 });
 
 test('each mode yields the correct (sandbox, approval) flag pair', () => {
-  assert.deepStrictEqual(permissionArgs('plan'), ['--sandbox', 'read-only', '--ask-for-approval', 'never']);
-  assert.deepStrictEqual(permissionArgs('manual'), ['--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
-  assert.deepStrictEqual(permissionArgs('acceptEdits'), ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request']);
-  assert.deepStrictEqual(permissionArgs('auto'), ['--sandbox', 'workspace-write', '--ask-for-approval', 'never']);
-  assert.deepStrictEqual(permissionArgs('full-auto'), ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-failure']);
-  assert.deepStrictEqual(permissionArgs('full-access'), ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never']);
+  assert.deepStrictEqual(permissionArgs('plan'), ['--sandbox', 'read-only', '-c', 'approval_policy=never']);
+  assert.deepStrictEqual(permissionArgs('manual'), ['--sandbox', 'read-only', '-c', 'approval_policy=on-request']);
+  assert.deepStrictEqual(permissionArgs('acceptEdits'), ['--sandbox', 'workspace-write', '-c', 'approval_policy=on-request']);
+  assert.deepStrictEqual(permissionArgs('auto'), ['--sandbox', 'workspace-write', '-c', 'approval_policy=never']);
+  assert.deepStrictEqual(permissionArgs('full-auto'), ['--sandbox', 'workspace-write', '-c', 'approval_policy=on-failure']);
+  assert.deepStrictEqual(permissionArgs('full-access'), ['--sandbox', 'danger-full-access', '-c', 'approval_policy=never']);
 });
 
 test('every advertised permission mode maps to a real flag pair (no dead dropdown entries)', () => {
@@ -55,7 +55,7 @@ test('buildArgs threads model, effort (incl xhigh) and the permission pair into 
     'exec', '--json', '--skip-git-repo-check',
     '-m', 'gpt-5-codex',
     '-c', 'model_reasoning_effort=xhigh',
-    '--sandbox', 'workspace-write', '--ask-for-approval', 'on-failure',
+    '--sandbox', 'workspace-write', '-c', 'approval_policy=on-failure',
     'do it',
   ]);
 });
@@ -64,7 +64,7 @@ test("buildArgs with (default) model/effort omits those flags but still sets the
   const a = buildArgs('go', { model: '(default)', effort: '(default)', permissionMode: 'plan' });
   assert.deepStrictEqual(a, [
     'exec', '--json', '--skip-git-repo-check',
-    '--sandbox', 'read-only', '--ask-for-approval', 'never',
+    '--sandbox', 'read-only', '-c', 'approval_policy=never',
     'go',
   ]);
 });
