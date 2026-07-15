@@ -88,8 +88,8 @@ function mcpStatus() { return {}; } // codex reports no MCP status yet; keep the
 // FULL capability, no dumbing down (D-011): every reasoning effort incl. xhigh, and the
 // permission matrix incl. Codex's own full-auto/full-access presets on top of the four
 // Claude-named modes §Engine defines. Model IDs are volatile — '(default)' always works and
-// lets Codex pick; the named ones are the current subscription models (extend when they change).
-const CODEX_MODELS = ['(default)', 'gpt-5-codex', 'gpt-5'];
+// lets Codex pick; the named ones are the current gpt-5.6 tier (sol>terra>luna; extend when they change).
+const CODEX_MODELS = ['(default)', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
 const CODEX_EFFORTS = ['(default)', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
 // permissionMode → [sandbox_mode, approval_policy] (D-013: static policy, no live callback).

@@ -234,7 +234,8 @@ function installSkills(force) {
   try {
     const results = skills.install({ force });
     const changed = results.filter((r) => r.action === 'installed' || r.action === 'updated');
-    return changed.length ? `Skills ${force ? 'updated' : 'installed'}: ${changed.map((r) => r.name).join(', ')}` : null;
+    const names = [...new Set(changed.map((r) => r.name))]; // per-engine results → one line per skill name
+    return names.length ? `Skills ${force ? 'updated' : 'installed'}: ${names.join(', ')}` : null;
   } catch (e) {
     return `Could not install skills: ${String((e && e.message) || e)}`;
   }
