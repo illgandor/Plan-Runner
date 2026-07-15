@@ -1,49 +1,91 @@
 {
   "name": "plan-runner",
   "displayName": "Plan Runner",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "An SDK chat panel that autonomously drives a master-plan project — one fresh Claude context window per step, right inside VS Code.",
   "publisher": "notacult",
   "license": "UNLICENSED",
   "private": true,
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
-  "repository": { "type": "git", "url": "https://github.com/illgandor/Plan-Runner" },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/illgandor/Plan-Runner"
+  },
   "main": "./src/extension.js",
-  "activationEvents": ["onView:planRunner.chat", "workspaceContains:PROGRESS.md"],
+  "activationEvents": [
+    "onView:planRunner.chat",
+    "workspaceContains:PROGRESS.md"
+  ],
   "contributes": {
     "configuration": {
       "title": "Plan Runner",
       "properties": {
         "planRunner.pauseThresholdPct": {
-          "type": "number", "default": 90, "minimum": 10, "maximum": 100, "scope": "application",
+          "type": "number",
+          "default": 90,
+          "minimum": 10,
+          "maximum": 100,
+          "scope": "application",
           "description": "Pause the loop when account usage reaches this % (applies to all windows)."
         },
         "planRunner.usagePollSeconds": {
-          "type": "number", "default": 60, "minimum": 10, "maximum": 3600, "scope": "application",
+          "type": "number",
+          "default": 60,
+          "minimum": 10,
+          "maximum": 3600,
+          "scope": "application",
           "description": "How often (seconds) to poll `claude /usage` for the meter."
         },
         "planRunner.finalizeQuietSeconds": {
-          "type": "number", "default": 120, "minimum": 0, "maximum": 600, "scope": "application",
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "maximum": 600,
+          "scope": "application",
           "description": "After a step finishes, wait for this many seconds of no activity before starting the next step — gives the session time to commit/push and leaves its summary on screen. 0 = advance immediately."
         }
       }
     },
     "viewsContainers": {
       "activitybar": [
-        { "id": "planRunner", "title": "Plan Runner", "icon": "media/icon.svg" }
+        {
+          "id": "planRunner",
+          "title": "Plan Runner",
+          "icon": "media/icon.svg"
+        }
       ]
     },
     "views": {
       "planRunner": [
-        { "type": "webview", "id": "planRunner.chat", "name": "Plan Runner" }
+        {
+          "type": "webview",
+          "id": "planRunner.chat",
+          "name": "Plan Runner"
+        }
       ]
     },
     "commands": [
-      { "command": "planRunner.toggle", "title": "Plan Runner: Toggle Auto-Run for this Workspace" },
-      { "command": "planRunner.start", "title": "Plan Runner: Start" },
-      { "command": "planRunner.stop", "title": "Plan Runner: Stop" },
-      { "command": "planRunner.installSkills", "title": "Plan Runner: Reinstall master-plan + next-step Skills" }
+      {
+        "command": "planRunner.toggle",
+        "title": "Plan Runner: Toggle Auto-Run for this Workspace"
+      },
+      {
+        "command": "planRunner.start",
+        "title": "Plan Runner: Start"
+      },
+      {
+        "command": "planRunner.stop",
+        "title": "Plan Runner: Stop"
+      },
+      {
+        "command": "planRunner.installSkills",
+        "title": "Plan Runner: Reinstall master-plan + next-step Skills"
+      }
     ]
   },
   "scripts": {

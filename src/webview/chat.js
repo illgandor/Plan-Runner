@@ -18,7 +18,7 @@
     <div class="meter" id="meter" hidden>
       <div class="gauge"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span></div>
       <div class="gauge"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span></div>
-      <div class="gauge tokrow" id="tokrow" hidden title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
+      <div class="gauge tokrow" id="tokrow" style="display:none" title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
       <label class="thresh" title="Pause the loop at this account-usage % (applies to all windows)">Pause @ <input id="thresh" type="number" min="10" max="100" step="1">%</label>
     </div>
     <div class="status" id="status">Idle</div>
@@ -217,7 +217,7 @@
   function usage(d) {
     $('meter').hidden = false;
     const codex = d.engine === 'codex';
-    $('tokrow').hidden = !codex;      // the token counter shows on Codex only
+    $('tokrow').style.display = codex ? 'flex' : 'none'; // inline display beats the .gauge{display:flex} rule
     const m = $('meter');
     if (codex) {
       // Codex has no account usage % — show N/A instead of the stale Claude reading, and
