@@ -14,6 +14,7 @@
       <select id="mode" title="Permission mode"></select>
       <span class="spacer"></span>
       <span class="chip" id="ctx" hidden>ctx —</span>
+      <span class="ver" id="ver" title="Plan Runner version"></span>
     </div>
     <div class="meter" id="meter" hidden>
       <div class="gauge"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span></div>
@@ -163,6 +164,7 @@
       case 'config':
         fill($('engine'), d.engines, d.engine);
         fill($('model'), d.models, d.model); fill($('effort'), d.efforts, d.effort); fill($('mode'), d.modes, d.mode);
+        if (d.version) $('ver').textContent = 'v' + d.version;
         enabled = d.enabled; reflect(); break;
       case 'enabled': enabled = d.value; reflect(); break;
       case 'status':

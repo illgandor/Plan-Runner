@@ -41,7 +41,7 @@ function post(msg) { if (view) view.webview.postMessage(msg); }
 function sendConfig() {
   const c = caps();
   post({ kind: 'config', enabled: state.enabled, engine: state.engine,
-    model: state.model, effort: state.effort, mode: state.mode,
+    model: state.model, effort: state.effort, mode: state.mode, version: require('../package.json').version,
     engines: ENGINES, models: c.models, efforts: c.efforts, modes: c.permissionModes });
 }
 // §Config keys — application-scoped, read the same in every window (D-004).
