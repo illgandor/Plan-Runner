@@ -15,7 +15,7 @@
 // A generation counter invalidates stale callbacks from a torn-down step.
 const { EventEmitter } = require('events');
 const { execFileSync } = require('child_process');
-const { STEP_PROMPT, MASTER_PLAN_PROMPT } = require('./constants');
+const { STEP_PROMPT, CODEX_STEP_SUFFIX, MASTER_PLAN_PROMPT } = require('./constants');
 const { readPointer } = require('./progress');
 const session = require('./session');
 const engine = require('./engine');
@@ -144,7 +144,9 @@ class Runner extends EventEmitter {
     this._advancedPlan = false; // a real step to run → reset the master-plan-once guard
     this.emit('status', { state: 'running', step: stepId, detail: `Running ${stepId}` });
     this.emit('step-started', { step: stepId });
-    this._startSession(stepId, STEP_PROMPT, null);
+    // Codex ends turns early — nudge it to run the whole step to a pointer-advance (Fix P0.1.10).
+    const prompt = STEP_PROMPT + ((this.project.engine || 'claude') === 'codex' ? CODEX_STEP_SUFFIX : '');
+    this._startSession(stepId, prompt, null);
   }
 
   // Plan boundary (P02-S08): one FRESH session running the master-plan skill to close the

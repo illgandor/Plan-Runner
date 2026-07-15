@@ -57,6 +57,18 @@ test('pointer advanced → holds for finalizeMs, then tears down + emits step-do
   } finally { restore(); }
 });
 
+test('Codex step prompt gets the CODEX_STEP_SUFFIX; Claude does not', () => {
+  const grab = (engine) => {
+    const r = new Runner({ id: 'x', path: '.', engine, model: '(default)', effort: '(default)', mode: 'auto' });
+    let prompt = '';
+    r._startSession = (_step, p) => { prompt = p; }; // capture, don't spawn
+    r._runStep('P01-S01');
+    return prompt;
+  };
+  assert.match(grab('codex'), /Complete the ENTIRE step/, 'Codex gets the run-to-completion suffix');
+  assert.doesNotMatch(grab('claude'), /Complete the ENTIRE step/, 'Claude keeps the plain step prompt');
+});
+
 test('usage gate is inert on Codex — never pauses a Codex run on Claude usage', () => {
   const over = { isOverThreshold: () => true };
   const codex = new Runner({ id: 'c', path: '.', engine: 'codex', model: '(default)', effort: '(default)', mode: 'auto' });

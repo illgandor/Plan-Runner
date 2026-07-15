@@ -129,8 +129,11 @@
     const m = payload.msg;
     switch (m.type) {
       case 'init': break; // MCP status lives in the 🔌 button now — no per-session/reply banner
-      case 'text-delta': appendText(m.text); break;
-      case 'assistant-text': if (cur && !cur.dataset.streamed) appendText(m.text); break; // streamed already? skip dupe
+      case 'text-delta': appendText(m.text); if (cur) cur.dataset.delta = '1'; break; // mark: streamed live
+      case 'assistant-text':
+        if (cur && cur.dataset.delta) { cur = null; break; }  // Claude already streamed this via text-delta — skip the dupe
+        cur = null; appendText(m.text);                        // Codex (no deltas) / non-streamed reply — render as its own bubble
+        break;
       case 'thinking': appendThinking(m.text); break;
       case 'tool-use': toolUse(m); break;
       case 'tool-result': toolResult(m); break;

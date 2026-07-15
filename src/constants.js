@@ -7,6 +7,15 @@ const STEP_PROMPT =
   'end-to-end (verify the gate, implement it, commit, update PROGRESS.md, get ' +
   'plan_check.py to exit 0), then STOP. Do not roll into the following step.';
 
+// Codex runs headless (`codex exec`) and tends to end its turn early to "report progress",
+// stalling the loop at needs-you before the step is closed out. This suffix makes it run the
+// whole step to a pointer-advance in one turn and not bail on harmless sandbox warnings.
+const CODEX_STEP_SUFFIX =
+  ' Complete the ENTIRE step in THIS turn — implement, commit, and update PROGRESS.md so its ' +
+  '`NEXT:` pointer advances, then get plan_check.py to exit 0. Do NOT end your turn until the ' +
+  'pointer has advanced. Treat harmless sandbox warnings (e.g. git being unable to read the ' +
+  'global ignore/config file) as non-blocking and keep going.';
+
 // Plan-boundary prompt (P02-S08). When PROGRESS.md's pointer reads "PLAN COMPLETE" the
 // runner runs this ONCE instead of stopping for the owner: master-plan closes the finished
 // plan and, if one is QUEUED, activates it and re-points NEXT at its first step (else NEXT:
@@ -36,4 +45,4 @@ const POINTER_RE = /NEXT:\s*(.+)/;
 const ALLOWED_MODES = ['auto', 'acceptEdits', 'plan', 'manual'];
 const DEFAULT_MODE = 'auto';
 
-module.exports = { STEP_PROMPT, MASTER_PLAN_PROMPT, ALLOWED_TOOLS, POINTER_RE, ALLOWED_MODES, DEFAULT_MODE };
+module.exports = { STEP_PROMPT, CODEX_STEP_SUFFIX, MASTER_PLAN_PROMPT, ALLOWED_TOOLS, POINTER_RE, ALLOWED_MODES, DEFAULT_MODE };

@@ -191,7 +191,11 @@ function spawnTurn(id, cwd, prompt, options, resumeId, send, onDone) {
   // stdin as an extra `<stdin>` block and BLOCKS on EOF forever (cli >=0.144) — the turn hangs
   // with no output. Closing stdin makes it run the argv prompt and stream normally. Same fix
   // usage.js uses for `claude -p`. (Fixes: Start on Codex shows the step then nothing streams.)
-  try { child = spawn(bin, buildArgs(prompt, options, resumeId), { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
+  // env: override ONLY core.excludesFile (empty) so git inside the workspace-write sandbox
+  // doesn't warn it "can't access ~/.config/git/ignore" — harmless, but it distracts the model
+  // into stopping. GIT_CONFIG_* injection leaves identity/config untouched (commits still work).
+  const env = { ...process.env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.excludesFile', GIT_CONFIG_VALUE_0: '' };
+  try { child = spawn(bin, buildArgs(prompt, options, resumeId), { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env }); }
   catch (e) {
     send('session:message', { id, msg: { type: 'error', message: String((e && e.message) || e) } });
     onDone && onDone();
