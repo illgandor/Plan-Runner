@@ -27,7 +27,7 @@ function provider(id) {
 // capabilities(id) → { models, efforts, permissionModes:[{value,label}] } for the dropdowns.
 // Claude's are the verbatim lists above; Codex supplies its own (S05).
 function capabilities(id) {
-  if (id === 'codex') return require('./codex').CODEX_CAPS;
+  if (id === 'codex') return require('./codex').codexCaps(); // gated: no auto/acceptEdits on an old CLI (P03-S02)
   return CLAUDE_CAPS;
 }
 

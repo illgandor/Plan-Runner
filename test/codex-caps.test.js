@@ -5,7 +5,8 @@
 // Stdlib only, spends no usage.
 const test = require('node:test');
 const assert = require('node:assert');
-const { CODEX_CAPS, permissionArgs, buildArgs } = require('../src/codex');
+const { CODEX_CAPS, permissionArgs, buildArgs, supportsAutoReview, codexCaps,
+  AUTO_REVIEW_UNAVAILABLE_MSG } = require('../src/codex');
 
 test('reasoning efforts expose (default)+low..xhigh and DROP minimal (luna rejects it)', () => {
   for (const e of ['low', 'medium', 'high', 'xhigh']) {
@@ -80,4 +81,32 @@ test("buildArgs with (default) model/effort omits those flags but still sets the
     '--sandbox', 'read-only', '-c', 'approval_policy="never"',
     'go',
   ]);
+});
+
+// ── P03-S02: auto-review compatibility fail-safe ─────────────────────────────────
+test('supportsAutoReview needs the >=0.144.0 floor; unparseable/absent → false (fail-safe)', () => {
+  assert.ok(supportsAutoReview('codex-cli 0.144.0-alpha.4'), 'the verified known-good build');
+  assert.ok(supportsAutoReview('0.144.0'), 'exactly the floor');
+  assert.ok(supportsAutoReview('0.200.1'), 'newer major/minor');
+  assert.ok(!supportsAutoReview('0.143.9'), 'older minor is too old');
+  assert.ok(!supportsAutoReview(null), 'no version string → unsupported, never assume');
+  assert.ok(!supportsAutoReview('garbage'), 'unparseable → unsupported');
+});
+
+test('codexCaps(true) leaves all four modes; codexCaps(false) drops the write modes + flags it', () => {
+  assert.deepStrictEqual(codexCaps(true).permissionModes.map((m) => m.value),
+    ['plan', 'manual', 'acceptEdits', 'auto'], 'supported CLI keeps every mode');
+  assert.ok(!codexCaps(true).autoReviewUnavailable);
+
+  const gated = codexCaps(false);
+  assert.deepStrictEqual(gated.permissionModes.map((m) => m.value), ['plan', 'manual'],
+    'unsupported CLI offers ONLY the read-only modes — no on-request write mode to stall');
+  assert.ok(gated.autoReviewUnavailable, 'flagged so the panel can explain');
+  assert.ok(!gated.permissionModes.some((m) => m.value === 'full-access'), 'never full-access (D-002)');
+  assert.ok(gated.models === codexCaps(true).models, 'models/efforts untouched by the gate');
+});
+
+test('there is a clear message to show when auto-review is unavailable', () => {
+  assert.match(AUTO_REVIEW_UNAVAILABLE_MSG, /auto/i);
+  assert.match(AUTO_REVIEW_UNAVAILABLE_MSG, /update/i);
 });

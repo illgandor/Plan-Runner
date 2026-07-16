@@ -4,7 +4,7 @@
 // the turn and exits. Multi-turn (answering "needs you", or resuming after a usage pause) =
 // `codex exec resume <threadId>` — we persist the thread id from thread.started. `turn.completed`
 // is the step-done signal the Runner keys on, exactly like Claude's `result` (D-007; S02 shapes).
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const { findCodex } = require('./codex-path');
 const session = require('./session'); // reuse the shared panel sink (extension sets it once)
 
@@ -120,6 +120,52 @@ const CODEX_CAPS = {
     { value: 'auto', label: 'auto (workspace-write · auto-review)' },
   ],
 };
+
+// ── Auto-review compatibility fail-safe (P03-S02) ────────────────────────────────
+// auto + acceptEdits ride on `approvals_reviewer="auto_review"` to escalate the sandbox-denied
+// `.git` write. An OLDER Codex CLI silently IGNORES that unknown config key, so `on-request`
+// then STALLS forever with no reviewer to answer it. So gate the two write modes on CLI support:
+// unsupported → offer only the read-only modes (plan/manual) + a clear "update Codex" note.
+// NEVER emit on-request without a reviewer, and NEVER fall back to full-access (D-002).
+const MIN_AUTO_REVIEW = [0, 144, 0]; // known-good floor (verified on 0.144.0-alpha.4); conservative
+const AUTO_REVIEW_UNAVAILABLE_MSG =
+  'This Codex CLI is too old for auto-review — auto and acceptEdits are disabled. ' +
+  'Update Codex (>= 0.144.0) for autonomous commits; plan and manual still work.';
+
+function parseCodexVersion(s) {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(s || ''));
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+// version string → does its CLI honor approvals_reviewer? Unparseable/absent → false (fail-safe:
+// never assume reviewer support we can't confirm, since guessing wrong is a headless stall).
+function supportsAutoReview(version) {
+  const v = parseCodexVersion(version);
+  if (!v) return false;
+  for (let i = 0; i < 3; i++) { if (v[i] !== MIN_AUTO_REVIEW[i]) return v[i] > MIN_AUTO_REVIEW[i]; }
+  return true; // exactly the floor
+}
+
+let _autoReview = null; // cached: `codex --version` is stable for a process, probe once
+function probeCodexVersion() {
+  const bin = findCodex();
+  if (!bin) return null;
+  try { return String(execFileSync(bin, ['--version'], { timeout: 5000, windowsHide: true })); }
+  catch { return null; } // not runnable → treat as unsupported (fail-safe)
+}
+function autoReviewSupported() {
+  if (_autoReview === null) _autoReview = supportsAutoReview(probeCodexVersion());
+  return _autoReview;
+}
+
+// codexCaps(supported?) — CODEX_CAPS gated to the CLI's real capability. Unsupported → drop the
+// reviewer-dependent write modes and flag it (autoReviewUnavailable) so the panel can explain
+// (extension.js surfaces AUTO_REVIEW_UNAVAILABLE_MSG). `supported` is injectable for tests.
+function codexCaps(supported = autoReviewSupported()) {
+  if (supported) return CODEX_CAPS;
+  return { ...CODEX_CAPS,
+    permissionModes: CODEX_CAPS.permissionModes.filter((m) => !CODEX_PERMS[m.value][2]),
+    autoReviewUnavailable: true };
+}
 
 // mode → ['--sandbox', X, '-c', 'approval_policy="Y"', ...]; unknown/absent → [] (Codex default).
 function permissionArgs(mode) {
@@ -266,4 +312,5 @@ function stop(id) {
 }
 
 module.exports = { start, send, chat, interrupt, stop, currentSessionId, mcpStatus,
-  mapCodexEvent, mapItem, buildArgs, permissionArgs, CODEX_CAPS, defaultSend };
+  mapCodexEvent, mapItem, buildArgs, permissionArgs, CODEX_CAPS, defaultSend,
+  supportsAutoReview, codexCaps, AUTO_REVIEW_UNAVAILABLE_MSG };

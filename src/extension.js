@@ -19,6 +19,21 @@ const { UsageService } = require('./usage');
 const ENGINES = ['claude', 'codex'];
 function caps() { return engine.capabilities(state.engine); }
 
+// Snap model/effort/mode to what the CURRENT engine actually offers, and persist. Guards the
+// P03-S02 stall: a persisted `auto` on a Codex CLI too old for auto-review must fall back to a
+// real mode (plan), never spawn an on-request turn that hangs with no reviewer.
+function clampSelections() {
+  const c = caps();
+  if (!c.models.includes(state.model)) { state.model = c.models[0]; ctx.workspaceState.update('planRunner.model', state.model); }
+  if (!c.efforts.includes(state.effort)) { state.effort = c.efforts[0]; ctx.workspaceState.update('planRunner.effort', state.effort); }
+  if (!c.permissionModes.some((pm) => pm.value === state.mode)) { state.mode = c.permissionModes[0].value; ctx.workspaceState.update('planRunner.mode', state.mode); }
+}
+// Tell the user why auto/acceptEdits vanished when the Codex CLI can't do auto-review (P03-S02).
+function notifyIfAutoReviewGated() {
+  if (state.engine === 'codex' && caps().autoReviewUnavailable)
+    post({ kind: 'info', text: require('./codex').AUTO_REVIEW_UNAVAILABLE_MSG });
+}
+
 let ctx = null;
 let view = null;        // the live WebviewView (null until the panel is opened)
 let runner = null;
@@ -88,6 +103,7 @@ async function onMessage(m) {
   switch (m.type) {
     case 'ready':
       sendConfig();
+      notifyIfAutoReviewGated(); // panel opened already on an auto-review-incapable Codex
       if (usage) postUsage(usage.snapshot()); // paint whatever's been read so far
       if (skillNote) post({ kind: 'info', text: skillNote });
       post({ kind: 'splash', text: p ? `Workspace: ${p.name} — NEXT: ${readPointer(p.path) || '(none)'}` : 'Open a master-plan project folder to begin.' });
@@ -133,11 +149,9 @@ async function onMessage(m) {
       state.engine = next;
       ctx.workspaceState.update('planRunner.engine', state.engine);
       // Drop selections the new engine can't offer back to its default (first item).
-      const c = caps();
-      if (!c.models.includes(state.model)) { state.model = c.models[0]; ctx.workspaceState.update('planRunner.model', state.model); }
-      if (!c.efforts.includes(state.effort)) { state.effort = c.efforts[0]; ctx.workspaceState.update('planRunner.effort', state.effort); }
-      if (!c.permissionModes.some((pm) => pm.value === state.mode)) { state.mode = c.permissionModes[0].value; ctx.workspaceState.update('planRunner.mode', state.mode); }
+      clampSelections();
       sendConfig(); // repopulate all four dropdowns for the new engine
+      notifyIfAutoReviewGated(); // explain the missing auto/acceptEdits on an old Codex CLI
       // Codex exposes no account usage — stop the Claude poller (this window only) and repaint
       // the meter as N/A; Claude resumes it. Per-window: never touches another window's poller.
       if (state.engine === 'codex') usage.stop(); else usage.start();
@@ -252,6 +266,7 @@ function activate(context) {
   state.model = context.workspaceState.get('planRunner.model') || '(default)';
   state.effort = context.workspaceState.get('planRunner.effort') || '(default)';
   state.mode = context.workspaceState.get('planRunner.mode') || 'auto';
+  clampSelections(); // drop a persisted mode the current engine can't honor (e.g. codex sans auto-review)
   skillNote = installSkills(false); // install-if-missing on every activation
   updater.start(context);           // poll GitHub Releases for a newer .vsix (D-003)
 
