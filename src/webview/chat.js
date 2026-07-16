@@ -113,6 +113,15 @@
     toolEls.set(msg.toolUseId, d);
     scroll();
   }
+  // Inline auto-review note (Codex escalate→retry): a small line inside the assistant group so a
+  // silent retry reads as "🔍 reviewed permission: … → approved" instead of an unexplained gap.
+  function reviewNote(text) {
+    const el = ensureAssistant();
+    const n = document.createElement('div');
+    n.className = 'review-note';
+    n.textContent = text;
+    el.appendChild(n); scroll();
+  }
   function toolResult(msg) {
     const d = toolEls.get(msg.toolUseId);
     if (!d) return;
@@ -137,6 +146,7 @@
       case 'thinking': appendThinking(m.text); break;
       case 'tool-use': toolUse(m); break;
       case 'tool-result': toolResult(m); break;
+      case 'review-note': reviewNote(m.text); break;
       case 'result':
         if (m.contextTokens) { const c = $('ctx'); c.hidden = false; c.textContent = 'ctx ' + fmt(m.contextTokens); }
         if (m.turnTokens) { sessionTokens += m.turnTokens; $('tokval').textContent = fmt(sessionTokens); } // Codex counter

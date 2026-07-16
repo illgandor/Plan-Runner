@@ -4,7 +4,7 @@
 // mcp_tool_call/error are the documented shapes. Stdlib only, spends no usage. (P02-S04)
 const test = require('node:test');
 const assert = require('node:assert');
-const { mapCodexEvent } = require('../src/codex');
+const { mapCodexEvent, reviewNote } = require('../src/codex');
 
 test('thread.started → init carrying the thread id (currentSessionId source)', () => {
   assert.deepStrictEqual(
@@ -73,6 +73,37 @@ test('turn.failed / error → error event', () => {
   assert.deepStrictEqual(mapCodexEvent({ type: 'turn.failed', error: { message: 'rate limited' } }),
     [{ type: 'error', message: 'rate limited' }]);
   assert.strictEqual(mapCodexEvent({ type: 'error', message: 'auth' })[0].type, 'error');
+});
+
+// ── P03-S03: auto-review escalate→retry note ─────────────────────────────────────
+// The observable auto-review pattern: a `.git` command fails under the sandbox, then the SAME
+// command re-runs and succeeds after the invisible review. reviewNote fires exactly on the retry.
+test('reviewNote fires on the approved retry (same command re-run, fail→success)', () => {
+  const st = {};
+  const gitDenied = { type: 'command_execution', command: 'git commit -m x', exit_code: 1 };
+  const gitOk = { type: 'command_execution', command: 'git commit -m x', exit_code: 0 };
+  assert.strictEqual(reviewNote(st, gitDenied), '', 'the first failure alone is not a note');
+  const note = reviewNote(st, gitOk);
+  assert.match(note, /reviewed permission/);
+  assert.match(note, /git commit -m x/);
+  assert.match(note, /approved/);
+  assert.strictEqual(st.lastFailedCmd, null, 'state cleared after the approved retry');
+});
+
+test('reviewNote stays silent for plain failures, plain successes, and command arrays', () => {
+  assert.strictEqual(reviewNote({}, { type: 'command_execution', command: 'ls', exit_code: 0 }), '',
+    'a lone success is not an escalation');
+  // A failure followed by a DIFFERENT successful command is not an approved retry.
+  const st = {};
+  reviewNote(st, { type: 'command_execution', command: 'git commit', exit_code: 1 });
+  assert.strictEqual(reviewNote(st, { type: 'command_execution', command: 'echo done', exit_code: 0 }), '');
+  // in_progress (exit_code null) and non-command items never trigger it.
+  assert.strictEqual(reviewNote({}, { type: 'command_execution', command: 'x', exit_code: null }), '');
+  assert.strictEqual(reviewNote({}, { type: 'reasoning', text: 'hm' }), '');
+  // command as an argv array joins for the comparison + label.
+  const arr = {};
+  reviewNote(arr, { type: 'command_execution', command: ['git', 'push'], exit_code: 1 });
+  assert.match(reviewNote(arr, { type: 'command_execution', command: ['git', 'push'], exit_code: 0 }), /git push/);
 });
 
 test('turn.started and unknown/garbage events map to nothing', () => {

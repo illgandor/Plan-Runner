@@ -200,6 +200,32 @@ function parseLine(line) {
   try { return JSON.parse(s); } catch { return null; }
 }
 
+// ── Auto-review escalation visibility (P03-S03) ──────────────────────────────────
+// `codex exec --json` does NOT stream the reviewer's reasoning (verified): all we observe when
+// auto/acceptEdits self-commit is a command that FAILS under the workspace-write sandbox (the
+// `.git` write is denied) then the SAME command re-run SUCCEEDING after the invisible review.
+// Detect that escalate→retry so a silent retry doesn't read as a hang, and emit one inline note.
+// (Reviewer *reasoning*, on the rare model that does emit it, already flows to the thinking
+// renderer via mapItem('reasoning') — nothing to add there.)
+function cmdText(item) {
+  const c = item && item.command;
+  return Array.isArray(c) ? c.join(' ') : String(c || '');
+}
+// A just-completed command_execution vs. the record of the last failed one (state.lastFailedCmd).
+// Same command, previously non-zero, now zero → the reviewer approved the escalated retry. Mutates
+// state.lastFailedCmd and returns a note string, or '' when it isn't an approved retry.
+// ponytail: matches on the retry pattern (exact command re-run), not a denial-output signature we
+// can't verify offline — loosen to a signature match only if false positives ever show up.
+function reviewNote(state, item) {
+  if (!item || item.type !== 'command_execution' || item.exit_code == null) return '';
+  const failed = item.exit_code !== 0;
+  const approved = !failed && !!state.lastFailedCmd && state.lastFailedCmd === cmdText(item);
+  state.lastFailedCmd = failed ? cmdText(item) : null;
+  if (!approved) return '';
+  const cmd = cmdText(item);
+  return `🔍 reviewed permission: ${cmd.length > 60 ? cmd.slice(0, 60) + '…' : cmd} → approved`;
+}
+
 function handleLine(id, entry, line, send) {
   const evt = parseLine(line);
   if (!evt) return;
@@ -208,6 +234,11 @@ function handleLine(id, entry, line, send) {
   for (const msg of mapCodexEvent(evt)) {
     if (msg.type === 'result' || msg.type === 'error') entry.gotResult = true;
     send('session:message', { id, msg });
+  }
+  // After the retry's tool-result, surface the auto-review escalate→retry as a small inline note.
+  if (evt.type === 'item.completed') {
+    const note = reviewNote(entry, evt.item);
+    if (note) send('session:message', { id, msg: { type: 'review-note', text: note } });
   }
 }
 
@@ -313,4 +344,4 @@ function stop(id) {
 
 module.exports = { start, send, chat, interrupt, stop, currentSessionId, mcpStatus,
   mapCodexEvent, mapItem, buildArgs, permissionArgs, CODEX_CAPS, defaultSend,
-  supportsAutoReview, codexCaps, AUTO_REVIEW_UNAVAILABLE_MSG };
+  supportsAutoReview, codexCaps, AUTO_REVIEW_UNAVAILABLE_MSG, reviewNote };
