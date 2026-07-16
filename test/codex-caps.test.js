@@ -4,6 +4,7 @@
 // Stdlib only, spends no usage.
 const test = require('node:test');
 const assert = require('node:assert');
+const path = require('path');
 const { CODEX_CAPS, permissionArgs, buildArgs } = require('../src/codex');
 
 test('every reasoning effort is exposed, including xhigh', () => {
@@ -42,6 +43,17 @@ test('every advertised permission mode maps to a real flag pair (no dead dropdow
   for (const m of CODEX_CAPS.permissionModes) {
     assert.strictEqual(permissionArgs(m.value).length, 4, `mode ${m.value} produced no flags`);
   }
+});
+
+test('workspace-write re-grants .git as writable (so git commit works); other modes do not', () => {
+  // workspace-write + known cwd → adds `.git` as a writable root
+  assert.deepStrictEqual(permissionArgs('auto', 'C:\\proj'),
+    ['--sandbox', 'workspace-write', '-c', 'approval_policy=never', '--add-dir', path.join('C:\\proj', '.git')]);
+  // read-only and full-access don't need it
+  assert.ok(!permissionArgs('plan', 'C:\\proj').includes('--add-dir'), 'read-only: no .git write');
+  assert.ok(!permissionArgs('full-access', 'C:\\proj').includes('--add-dir'), 'full-access: no sandbox to grant around');
+  // no cwd (e.g. bare buildArgs) → no add-dir, back-compatible
+  assert.ok(!permissionArgs('auto').includes('--add-dir'), 'no cwd → unchanged');
 });
 
 test('unknown/absent mode → no permission flags (Codex uses its own default)', () => {

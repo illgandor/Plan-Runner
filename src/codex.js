@@ -5,6 +5,7 @@
 // `codex exec resume <threadId>` — we persist the thread id from thread.started. `turn.completed`
 // is the step-done signal the Runner keys on, exactly like Claude's `result` (D-007; S02 shapes).
 const { spawn } = require('child_process');
+const path = require('path');
 const { findCodex } = require('./codex-path');
 const session = require('./session'); // reuse the shared panel sink (extension sets it once)
 
@@ -121,13 +122,19 @@ const CODEX_CAPS = {
 };
 
 // mode → ['--sandbox', X, '--ask-for-approval', Y]; unknown/absent → [] (Codex uses its default).
-function permissionArgs(mode) {
+function permissionArgs(mode, cwd) {
   const pair = CODEX_PERMS[mode];
+  if (!pair) return []; // unknown/absent → [] (Codex uses its own default)
   // `--sandbox` is valid on `codex exec`, but `-a/--ask-for-approval` is a TOP-LEVEL flag only
   // (codex-cli >=0.144 rejects it after `exec`). So pass approval as a `-c approval_policy=` config
-  // override — same mechanism buildArgs already uses for model_reasoning_effort. (Fixes the
-  // "unexpected argument '--ask-for-approval'" error on Start.)
-  return pair ? ['--sandbox', pair[0], '-c', `approval_policy=${pair[1]}`] : [];
+  // override — same mechanism buildArgs already uses for model_reasoning_effort.
+  const args = ['--sandbox', pair[0], '-c', `approval_policy=${pair[1]}`];
+  // workspace-write leaves the workspace writable but protects `.git/` as READ-ONLY, so
+  // `git commit` fails ("sandbox denies writes to .git/index.lock") and no step can close out.
+  // Re-grant `.git` as an explicit writable root so the master-plan loop can commit. (read-only
+  // and danger-full-access modes don't need it.)
+  if (pair[0] === 'workspace-write' && cwd) args.push('--add-dir', path.join(cwd, '.git'));
+  return args;
 }
 
 function buildArgs(prompt, options = {}, resumeId) {
@@ -136,7 +143,7 @@ function buildArgs(prompt, options = {}, resumeId) {
   a.push('--json', '--skip-git-repo-check');
   if (options.model && options.model !== '(default)') a.push('-m', options.model);
   if (options.effort && options.effort !== '(default)') a.push('-c', `model_reasoning_effort=${options.effort}`);
-  a.push(...permissionArgs(options.permissionMode));
+  a.push(...permissionArgs(options.permissionMode, options.cwd));
   a.push(prompt);
   return a;
 }
@@ -195,7 +202,7 @@ function spawnTurn(id, cwd, prompt, options, resumeId, send, onDone) {
   // doesn't warn it "can't access ~/.config/git/ignore" — harmless, but it distracts the model
   // into stopping. GIT_CONFIG_* injection leaves identity/config untouched (commits still work).
   const env = { ...process.env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.excludesFile', GIT_CONFIG_VALUE_0: '' };
-  try { child = spawn(bin, buildArgs(prompt, options, resumeId), { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env }); }
+  try { child = spawn(bin, buildArgs(prompt, { ...options, cwd }, resumeId), { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env }); }
   catch (e) {
     send('session:message', { id, msg: { type: 'error', message: String((e && e.message) || e) } });
     onDone && onDone();

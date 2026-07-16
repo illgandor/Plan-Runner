@@ -1,7 +1,7 @@
 {
   "name": "plan-runner",
   "displayName": "Plan Runner",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "An SDK chat panel that autonomously drives a master-plan project — one fresh Claude context window per step, right inside VS Code.",
   "publisher": "notacult",
   "license": "UNLICENSED",
