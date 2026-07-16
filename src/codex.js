@@ -5,7 +5,6 @@
 // `codex exec resume <threadId>` — we persist the thread id from thread.started. `turn.completed`
 // is the step-done signal the Runner keys on, exactly like Claude's `result` (D-007; S02 shapes).
 const { spawn } = require('child_process');
-const path = require('path');
 const { findCodex } = require('./codex-path');
 const session = require('./session'); // reuse the shared panel sink (extension sets it once)
 
@@ -89,23 +88,26 @@ const ctx = new Map();       // id -> { cwd, options } (so send(id,text) can res
 function currentSessionId(id) { return threadIds.get(id) || null; }
 function mcpStatus() { return {}; } // codex reports no MCP status yet; keep the surface symmetric
 
-// ── Capabilities (P02-S05) ──────────────────────────────────────────────────────
-// FULL capability, no dumbing down (D-011): every reasoning effort incl. xhigh, and the
-// permission matrix incl. Codex's own full-auto/full-access presets on top of the four
-// Claude-named modes §Engine defines. Model IDs are volatile — '(default)' always works and
-// lets Codex pick; the named ones are the current gpt-5.6 tier (sol>terra>luna; extend when they change).
+// ── Capabilities (P02-S05 · reworked P03-S01) ────────────────────────────────────
+// FULL capability, no dumbing down (D-011): every reasoning effort the models accept, and
+// EXACTLY the four Claude-symmetric modes §Engine defines — no Codex-only full-auto/full-access
+// (D-014 dropped both: full-access violates D-002's no-bypass rule, full-auto isn't symmetric).
+// Model IDs are volatile — '(default)' always works and lets Codex pick; the named ones are the
+// current gpt-5.6 tier (sol>terra>luna; extend when they change). luna rejects `minimal` effort
+// (only none/low/medium/high/xhigh) → drop it so a luna turn can't 400 on the effort override.
 const CODEX_MODELS = ['(default)', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
-const CODEX_EFFORTS = ['(default)', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+const CODEX_EFFORTS = ['(default)', 'low', 'medium', 'high', 'xhigh'];
 
-// permissionMode → [sandbox_mode, approval_policy] (D-013: static policy, no live callback).
-// First four are §Engine's contract mapping; full-auto/full-access preserve Codex-only reach.
+// permissionMode → [sandbox_mode, approval_policy, reviewer?] (D-013: static policy, no live
+// callback). The four Claude-symmetric modes. auto + acceptEdits self-commit their own git via
+// Codex auto-review: workspace-write protects `.git` read-only, so on-request + auto_review
+// escalates the `.git` write and the reviewer auto-approves it inside the sandbox (D-014,
+// test-verified). No bypass/full-access mode ever (D-002).
 const CODEX_PERMS = {
-  plan:          ['read-only',           'never'],
-  manual:        ['read-only',           'on-request'],
-  acceptEdits:   ['workspace-write',     'on-request'],
-  auto:          ['workspace-write',     'never'],
-  'full-auto':   ['workspace-write',     'on-failure'],
-  'full-access': ['danger-full-access',  'never'],
+  plan:        ['read-only',       'never'],
+  manual:      ['read-only',       'on-request'],
+  acceptEdits: ['workspace-write', 'on-request', 'auto_review'],
+  auto:        ['workspace-write', 'on-request', 'auto_review'],
 };
 
 const CODEX_CAPS = {
@@ -114,26 +116,24 @@ const CODEX_CAPS = {
   permissionModes: [
     { value: 'plan', label: 'plan (read-only)' },
     { value: 'manual', label: 'manual (read-only · ask)' },
-    { value: 'acceptEdits', label: 'acceptEdits (workspace-write · ask)' },
-    { value: 'auto', label: 'auto (workspace-write)' },
-    { value: 'full-auto', label: 'full-auto (workspace-write · retry)' },
-    { value: 'full-access', label: 'full-access ⚠ (no sandbox)' },
+    { value: 'acceptEdits', label: 'acceptEdits (workspace-write · auto-review)' },
+    { value: 'auto', label: 'auto (workspace-write · auto-review)' },
   ],
 };
 
-// mode → ['--sandbox', X, '--ask-for-approval', Y]; unknown/absent → [] (Codex uses its default).
-function permissionArgs(mode, cwd) {
-  const pair = CODEX_PERMS[mode];
-  if (!pair) return []; // unknown/absent → [] (Codex uses its own default)
+// mode → ['--sandbox', X, '-c', 'approval_policy="Y"', ...]; unknown/absent → [] (Codex default).
+function permissionArgs(mode) {
+  const p = CODEX_PERMS[mode];
+  if (!p) return []; // unknown/absent → [] (Codex uses its own default)
   // `--sandbox` is valid on `codex exec`, but `-a/--ask-for-approval` is a TOP-LEVEL flag only
   // (codex-cli >=0.144 rejects it after `exec`). So pass approval as a `-c approval_policy=` config
-  // override — same mechanism buildArgs already uses for model_reasoning_effort.
-  const args = ['--sandbox', pair[0], '-c', `approval_policy=${pair[1]}`];
-  // workspace-write leaves the workspace writable but protects `.git/` as READ-ONLY, so
-  // `git commit` fails ("sandbox denies writes to .git/index.lock") and no step can close out.
-  // Re-grant `.git` as an explicit writable root so the master-plan loop can commit. (read-only
-  // and danger-full-access modes don't need it.)
-  if (pair[0] === 'workspace-write' && cwd) args.push('--add-dir', path.join(cwd, '.git'));
+  // override — same mechanism buildArgs uses for model_reasoning_effort. QUOTE the value: the TOML
+  // override parser only accepts `on-request` (hyphen) as a quoted string; bare `never` also works
+  // but we quote uniformly.
+  const args = ['--sandbox', p[0], '-c', `approval_policy="${p[1]}"`];
+  // Reviewer (auto_review) escalates + auto-approves the sandbox-denied `.git` write so auto/
+  // acceptEdits commit their own git — no `--add-dir` hack, no manual approval (D-014).
+  if (p[2]) args.push('-c', `approvals_reviewer="${p[2]}"`);
   return args;
 }
 
@@ -143,7 +143,7 @@ function buildArgs(prompt, options = {}, resumeId) {
   a.push('--json', '--skip-git-repo-check');
   if (options.model && options.model !== '(default)') a.push('-m', options.model);
   if (options.effort && options.effort !== '(default)') a.push('-c', `model_reasoning_effort=${options.effort}`);
-  a.push(...permissionArgs(options.permissionMode, options.cwd));
+  a.push(...permissionArgs(options.permissionMode));
   a.push(prompt);
   return a;
 }
@@ -202,7 +202,7 @@ function spawnTurn(id, cwd, prompt, options, resumeId, send, onDone) {
   // doesn't warn it "can't access ~/.config/git/ignore" — harmless, but it distracts the model
   // into stopping. GIT_CONFIG_* injection leaves identity/config untouched (commits still work).
   const env = { ...process.env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.excludesFile', GIT_CONFIG_VALUE_0: '' };
-  try { child = spawn(bin, buildArgs(prompt, { ...options, cwd }, resumeId), { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env }); }
+  try { child = spawn(bin, buildArgs(prompt, options, resumeId), { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env }); }
   catch (e) {
     send('session:message', { id, msg: { type: 'error', message: String((e && e.message) || e) } });
     onDone && onDone();
