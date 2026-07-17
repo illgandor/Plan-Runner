@@ -51,6 +51,12 @@ function stopTimeReached(startedAtMs, nowMs, hhmm) {
 }
 
 const MAX_STEPS = 200; // hard safety cap per ON run
+// P05-S05: an error turn-end tears down the session (session.js deletes it), so it's not the
+// same "Claude is waiting on you" as a clean result that didn't advance the pointer. A transient
+// error (network blip, SDK crash) retries the SAME step in a FRESH session up to MAX_RETRIES with
+// a short linear backoff; only after that do we drop to a needs-you flagged "errored".
+const MAX_RETRIES = 2;
+const RETRY_BACKOFF_MS = 3000; // per-attempt backoff base (× attempt#); overridable in tests
 // After a step's turn ends AND the NEXT pointer advanced, the session may still be closing
 // out (commit → push → the "what I did" summary). Wait for this long of NO further activity
 // before teardown+advance, so an in-flight close-out isn't cut off and the summary stays on
@@ -87,6 +93,9 @@ class Runner extends EventEmitter {
     this.gitCheck = gitState;  // handoff guard; overridable in tests
     this.now = () => Date.now(); // wall clock for the stop-at-time ceiling; overridable in tests
     this._startedAtMs = 0;       // run start; reference for stopAtTime (set in start())
+    this._retries = 0;           // error-retry attempts spent on the current step (reset per step)
+    this.retryBackoffMs = RETRY_BACKOFF_MS; // per-attempt backoff base; overridable in tests
+    this._retryTimer = null;
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -114,6 +123,7 @@ class Runner extends EventEmitter {
   _finish(state, detail) {
     this._gen++; // invalidate any in-flight step callbacks
     clearTimeout(this._finalizeTimer);
+    clearTimeout(this._retryTimer);
     this.finalizing = false;
     this.running = false;
     this.needsYou = false;
@@ -167,11 +177,15 @@ class Runner extends EventEmitter {
     this.needsYou = false;
     this.paused = false;
     this._advancedPlan = false; // a real step to run → reset the master-plan-once guard
+    this._retries = 0;          // fresh step off the loop → fresh error-retry budget
     this.emit('status', { state: 'running', step: stepId, detail: `Running ${stepId}` });
     this.emit('step-started', { step: stepId });
-    // Codex ends turns early — nudge it to run the whole step to a pointer-advance (Fix P0.1.10).
-    const prompt = STEP_PROMPT + ((this.project.engine || 'claude') === 'codex' ? CODEX_STEP_SUFFIX : '');
-    this._startSession(stepId, prompt, null);
+    this._startSession(stepId, this._stepPrompt(), null);
+  }
+
+  // Codex ends turns early — nudge it to run the whole step to a pointer-advance (Fix P0.1.10).
+  _stepPrompt() {
+    return STEP_PROMPT + ((this.project.engine || 'claude') === 'codex' ? CODEX_STEP_SUFFIX : '');
   }
 
   // Plan boundary (P02-S08): one FRESH session running the master-plan skill to close the
@@ -206,7 +220,7 @@ class Runner extends EventEmitter {
       session.defaultSend(channel, payload); // → panel (render), same as v2's sdkDriver
       if (gen !== this._gen || channel !== 'session:message') return;
       const t = payload.msg.type;
-      if (t === 'result' || t === 'error') this._onTurnEnd(stepId, gen);
+      if (t === 'result' || t === 'error') this._onTurnEnd(stepId, gen, t === 'error');
       else if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
     };
   }
@@ -215,7 +229,7 @@ class Runner extends EventEmitter {
   // If not, Claude is waiting on you (it asked a question) — keep the session ALIVE and
   // flag needs-you; your answer() continues it. (A genuine stall looks the same: you
   // just tell it what to do, or Stop.) A pause-driven turn end is ignored (this.paused).
-  _onTurnEnd(stepId, gen) {
+  _onTurnEnd(stepId, gen, isError) {
     if (gen !== this._gen || this.paused) return; // paused = interrupt ended the turn; keep the id to resume
     this._turnLive = false;
     // Master-plan (PLAN COMPLETE) session ended: tear down for a fresh context, then re-read
@@ -228,8 +242,29 @@ class Runner extends EventEmitter {
     }
     const after = readPointer(this.project.path);
     if (after && after !== stepId) return this._beginFinalize(stepId, gen); // work done → settle, then advance
+    // Pointer unchanged. A clean result = Claude is waiting on you. An error tore the session
+    // down — retry the step in a fresh session up to the bound before dropping to needs-you.
+    if (isError && this._retries < MAX_RETRIES) return this._retryStep(stepId);
     this.needsYou = true;
-    this.emit('status', { state: 'needs-you', step: stepId, detail: `${stepId}: waiting on you — answer in the panel` });
+    const detail = isError
+      ? `${stepId}: errored (retried ${this._retries}×) — answer in the panel to continue, or Stop`
+      : `${stepId}: waiting on you — answer in the panel`;
+    this.emit('status', { state: 'needs-you', step: stepId, detail });
+  }
+
+  // Error retry (P05-S05): the errored session is already gone, so a bounded fresh session
+  // reattempts the same step after a linear backoff. Stop or a usage-pause during the wait
+  // cancels it (_finish clears the timer; the guard drops a stale fire).
+  _retryStep(stepId) {
+    this._retries++;
+    const wait = this.retryBackoffMs * this._retries;
+    this.emit('status', { state: 'running', step: stepId,
+      detail: `${stepId} errored — retry ${this._retries}/${MAX_RETRIES} in ${Math.round(wait / 1000)}s` });
+    clearTimeout(this._retryTimer);
+    this._retryTimer = setTimeout(() => {
+      if (this.stopRequested || this.paused) return;
+      this._startSession(stepId, this._stepPrompt(), null);
+    }, wait);
   }
 
   // Pointer advanced = the step's work is done, but close-out (commit/push/summary) may still
@@ -322,4 +357,4 @@ class Runner extends EventEmitter {
   }
 }
 
-module.exports = { Runner, MAX_STEPS, RESUME_PROMPT, gitState, stopTimeReached };
+module.exports = { Runner, MAX_STEPS, MAX_RETRIES, RESUME_PROMPT, gitState, stopTimeReached };
