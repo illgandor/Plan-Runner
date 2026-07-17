@@ -93,6 +93,17 @@ test('finalizeMs=0 disables the window — advances immediately', (t) => {
   } finally { restore(); }
 });
 
+test('finalize window is 0 for Codex, configured for Claude', () => {
+  // Codex `exec` is synchronous → the settle window is pure idle; skip it (0). The `finalizeMs=0
+  // disables the window` test above proves 0 ⇒ immediate teardown+advance, so this covers Codex.
+  const codex = new Runner({ id: 'c', path: '.', engine: 'codex', model: '(default)', effort: '(default)', mode: 'auto' });
+  codex.finalizeMs = 120000;
+  assert.equal(codex._finalizeWindowMs, 0, 'Codex skips the settle window regardless of finalizeMs');
+  const claude = new Runner({ id: 'd', path: '.', engine: 'claude', model: '(default)', effort: '(default)', mode: 'auto' });
+  claude.finalizeMs = 120000;
+  assert.equal(claude._finalizeWindowMs, 120000, 'Claude keeps the configured window');
+});
+
 test('handoff guard: dirty tree blocks the advance → needs-you, session kept alive', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'setImmediate'] });
   const p = tempProject('S1');

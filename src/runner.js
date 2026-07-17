@@ -312,10 +312,14 @@ class Runner extends EventEmitter {
   // Pointer advanced = the step's work is done, but close-out (commit/push/summary) may still
   // be finishing. Hold the session ALIVE and wait finalizeMs of quiet before teardown, so the
   // close-out can't be cut off and the summary stays readable. Stop or an answer cancels it.
+  // Codex `exec` is synchronous — the turn already ran to completion, so the settle window is
+  // pure idle; skip it (0). Claude may still be closing out → keep the configured window. The
+  // git-handoff guard in _advance stays the safety net for both engines. (P05-S08)
+  get _finalizeWindowMs() { return (this.project.engine === 'codex') ? 0 : this.finalizeMs; }
   _beginFinalize(stepId, gen) {
-    if (this.finalizeMs <= 0) return this._advance(stepId, gen);
+    if (this._finalizeWindowMs <= 0) return this._advance(stepId, gen);
     this.finalizing = true;
-    const secs = Math.round(this.finalizeMs / 1000);
+    const secs = Math.round(this._finalizeWindowMs / 1000);
     this.emit('status', { state: 'finalizing', step: stepId,
       detail: `${stepId} done — settling ${secs}s for close-out (commit/push). Stop to hold here.` });
     this._armFinalize(stepId, gen);
@@ -324,7 +328,7 @@ class Runner extends EventEmitter {
   // NOTHING has run for the full window (matches the standalone's byte-resets-the-timer rule).
   _armFinalize(stepId, gen) {
     clearTimeout(this._finalizeTimer);
-    this._finalizeTimer = setTimeout(() => this._advance(stepId, gen), this.finalizeMs);
+    this._finalizeTimer = setTimeout(() => this._advance(stepId, gen), this._finalizeWindowMs);
   }
   // Quiet window elapsed (or disabled): teardown for a fresh context, then run the next step.
   _advance(stepId, gen) {
