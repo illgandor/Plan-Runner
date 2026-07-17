@@ -169,16 +169,21 @@ class Runner extends EventEmitter {
     this._turnLive = true;
     const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode };
     if (resumeId) options.resume = resumeId;
-    this._provider.start(
-      { id: this.id, cwd: this.project.path, prompt, options },
-      { send: (channel, payload) => {
-          session.defaultSend(channel, payload); // → panel (render), same as v2's sdkDriver
-          if (gen !== this._gen || channel !== 'session:message') return;
-          const t = payload.msg.type;
-          if (t === 'result' || t === 'error') this._onTurnEnd(stepId, gen);
-          else if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
-        } }
-    );
+    this._provider.start({ id: this.id, cwd: this.project.path, prompt, options }, { send: this._wrapSend(stepId, gen) });
+  }
+
+  // The turn-end-watching send wrapper: renders to the panel, then (for the current generation)
+  // routes result/error to _onTurnEnd. Shared by _startSession AND answer() so a follow-up turn
+  // (Codex, or Claude after an errored turn — both start a fresh process) still fires turn-end
+  // instead of stalling forever (P05-S01). A live Claude session ignores this and reuses its own.
+  _wrapSend(stepId, gen) {
+    return (channel, payload) => {
+      session.defaultSend(channel, payload); // → panel (render), same as v2's sdkDriver
+      if (gen !== this._gen || channel !== 'session:message') return;
+      const t = payload.msg.type;
+      if (t === 'result' || t === 'error') this._onTurnEnd(stepId, gen);
+      else if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
+    };
   }
 
   // A turn ended. If NEXT advanced, the step's work is done → fresh session, next step.
@@ -274,15 +279,21 @@ class Runner extends EventEmitter {
   }
 
   // Your reply from the panel. A live session takes it as a new turn (continues the step);
-  // if none is live, chat() starts one so the answer isn't lost.
+  // if none is live (Codex has no process between turns; Claude tears down on an errored turn),
+  // chat() starts a fresh one — RESUMED onto the persisted thread/session id and driven by the
+  // same turn-end wrapper, so the follow-up turn advances the loop instead of stalling (P05-S01).
+  // Reuse the current generation (no bump): the step's session is still valid, so a live Claude
+  // turn-end (its own wrapper) stays matched too.
   answer(text) {
     this.needsYou = false;
     clearTimeout(this._finalizeTimer); // typing during the settle window holds it & continues the session
     this.finalizing = false;
     this._turnLive = true;
-    this.emit('status', { state: 'running', step: this.currentStep, detail: `Continuing ${this.currentStep}…` });
-    this._provider.chat({ id: this.id, cwd: this.project.path, prompt: text,
-      options: { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode } });
+    const stepId = this.currentStep;
+    this.emit('status', { state: 'running', step: stepId, detail: `Continuing ${stepId}…` });
+    const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode,
+      resume: this._provider.currentSessionId(this.id) || undefined };
+    this._provider.chat({ id: this.id, cwd: this.project.path, prompt: text, options }, { send: this._wrapSend(stepId, this._gen) });
   }
 }
 

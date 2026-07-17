@@ -195,9 +195,9 @@ function send(id, text) { sessions.get(id)?.input.push(text); }
 // Send-or-start: a live session (incl. a running step's) takes the text as a new turn;
 // only when none is live do we start fresh. This is how answering "needs you" continues
 // the SAME session instead of spawning a new one.
-function chat({ id, cwd, prompt, options }) {
+function chat({ id, cwd, prompt, options }, hooks = {}) {
   if (sessions.has(id)) send(id, prompt);
-  else start({ id, cwd, prompt, options });
+  else start({ id, cwd, prompt, options }, hooks); // no live session (e.g. after an error) → fresh, turn-end-wrapped
 }
 
 // q.interrupt()/q.return() are async — a sync try/catch misses their teardown rejections

@@ -324,9 +324,10 @@ function send(id, text) {
   spawnTurn(id, c.cwd, text, c.options, threadIds.get(id) || null, defaultSend, null);
 }
 
-// Send-or-start: resume the thread if we have one for this id, else begin a fresh one.
-function chat({ id, cwd, prompt, options = {} }) {
-  spawnTurn(id, cwd, prompt, options, threadIds.get(id) || null, defaultSend, null);
+// Send-or-start: resume the thread if we have one for this id, else begin a fresh one. hooks.send
+// (the Runner's turn-end wrapper) routes this follow-up turn's result to the loop (P05-S01).
+function chat({ id, cwd, prompt, options = {} }, hooks = {}) {
+  spawnTurn(id, cwd, prompt, options, threadIds.get(id) || null, hooks.send || defaultSend, hooks.onDone);
 }
 
 // Interrupt the live turn (usage-pause) — the thread id stays, so we can resume the same step.
