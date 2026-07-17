@@ -11,6 +11,14 @@ you'd otherwise do by hand with the ＋ new-session button. If a step needs you 
 or a command outside the auto-allow list), it asks **in the panel**; your answer continues
 the **same** session.
 
+## Spec-Driven Development
+
+Plan Runner is the **autonomous execution layer for spec-driven development**: you write the
+spec, it drives the build to completion. Point the `master-plan` skill at your spec —
+a [Spec Kit](https://github.com/github/spec-kit) or [Kiro](https://kiro.dev) spec, a plan
+doc, or any structured intent — and it decomposes it into stepped, window-sized plans; Plan
+Runner then executes those steps one fresh context window at a time until the plan is done.
+
 ## How it works
 
 - Detects step completion the same way the app does: `PROGRESS.md`'s `NEXT:` pointer
