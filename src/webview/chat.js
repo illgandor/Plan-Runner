@@ -331,9 +331,14 @@
       sel.appendChild(o);
     });
   }
+  let lastState;
   function setStatus(d) {
     const s = $('status'); s.textContent = d.detail || d.state;
     s.className = 'status' + (d.state === 'needs-you' ? ' needs-you' : '');
+    // On ENTERING needs-you, pull attention to the banner and put the cursor in the
+    // composer. Guard on the transition so a repeated needs-you doesn't steal focus mid-answer.
+    if (d.state === 'needs-you' && lastState !== 'needs-you') { s.scrollIntoView(); $('input').focus(); }
+    lastState = d.state;
   }
   function reflect() {
     // Never disable Start — a dead button reads as "broken". If the workspace is Off or
