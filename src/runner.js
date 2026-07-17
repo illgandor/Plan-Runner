@@ -35,6 +35,21 @@ function gitState(cwd) {
   } catch { return { clean: true, pushed: true }; } // not a git repo → don't block
 }
 
+// Optional wall-clock ceiling (planRunner.stopAtTime, "HH:MM"). Pure so it's testable with an
+// injected clock. The reference is the RUN's start time: the target is today's HH:MM, or the next
+// day's if that's already at/before the run started (so an overnight "stop at 06:00" works). Empty
+// or malformed → never stops. (D-016: default OFF.)
+function stopTimeReached(startedAtMs, nowMs, hhmm) {
+  if (!hhmm) return false;
+  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(hhmm).trim());
+  if (!m) return false;
+  const t = new Date(startedAtMs);
+  t.setHours(+m[1], +m[2], 0, 0);
+  let target = t.getTime();
+  if (target <= startedAtMs) target += 86400000; // already past at run start → next occurrence
+  return nowMs >= target;
+}
+
 const MAX_STEPS = 200; // hard safety cap per ON run
 // After a step's turn ends AND the NEXT pointer advanced, the session may still be closing
 // out (commit → push → the "what I did" summary). Wait for this long of NO further activity
@@ -70,6 +85,8 @@ class Runner extends EventEmitter {
     this._planSession = false; // true while the master-plan (PLAN COMPLETE) session is live (P02-S08)
     this._advancedPlan = false; // guards master-plan to once per PLAN COMPLETE (a 2nd unchanged → finish)
     this.gitCheck = gitState;  // handoff guard; overridable in tests
+    this.now = () => Date.now(); // wall clock for the stop-at-time ceiling; overridable in tests
+    this._startedAtMs = 0;       // run start; reference for stopAtTime (set in start())
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -81,6 +98,7 @@ class Runner extends EventEmitter {
     this.running = true;
     this.stopRequested = false;
     this.stepsRun = 0;
+    this._startedAtMs = this.now();
     this._runNext();
   }
 
@@ -116,6 +134,13 @@ class Runner extends EventEmitter {
   _runNext() {
     if (this.stopRequested) return this._finish('idle', 'Stopped');
     if (this.stepsRun >= MAX_STEPS) return this._finish('idle', 'Hit step cap — restart to continue');
+    // Owner ceilings (D-016, default OFF): bound the run by step count or wall-clock, independent of
+    // the usage gate. Checked here (between steps) so a step already in flight always finishes first.
+    const max = this.project.maxStepsPerRun;
+    if (max > 0 && this.stepsRun >= max)
+      return this._finish('idle', `Reached max steps per run (${max}) — restart to continue`);
+    if (stopTimeReached(this._startedAtMs, this.now(), this.project.stopAtTime))
+      return this._finish('idle', `Reached stop-at time (${this.project.stopAtTime}) — restart to continue`);
     const next = readPointer(this.project.path);
     if (!next) return this._finish('error', 'No NEXT pointer / PROGRESS.md — not a master-plan project');
     if (/^none/i.test(next)) return this._finish('done', `Project complete (${next})`);
@@ -297,4 +322,4 @@ class Runner extends EventEmitter {
   }
 }
 
-module.exports = { Runner, MAX_STEPS, RESUME_PROMPT, gitState };
+module.exports = { Runner, MAX_STEPS, RESUME_PROMPT, gitState, stopTimeReached };

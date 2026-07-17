@@ -56,6 +56,21 @@
           "maximum": 1000,
           "scope": "application",
           "description": "Optional per-step turn ceiling. When >0, a step that loops tools without ending its turn is halted at this many turns and drops to needs-you. 0 = no cap (default)."
+        },
+        "planRunner.maxStepsPerRun": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 1000,
+          "scope": "application",
+          "description": "Optional ceiling on how many steps one ON run completes. When >0, the run stops cleanly between steps once this many have finished. 0 = unlimited (default)."
+        },
+        "planRunner.stopAtTime": {
+          "type": "string",
+          "default": "",
+          "pattern": "^$|^([01]?\\d|2[0-3]):[0-5]\\d$",
+          "scope": "application",
+          "description": "Optional wall-clock stop time in 24h \"HH:MM\". When set, the run stops cleanly between steps at/after this time (next occurrence if it's already past when the run starts). Empty = off (default)."
         }
       }
     },
