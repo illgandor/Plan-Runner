@@ -122,7 +122,43 @@ function sdkOptions(cwd, options = {}) {
   // File checkpointing (P06-S06): snapshot files before edits so a bad step's changes can be
   // rolled back to step start (the step-start user message) via Query.rewindFiles(). (D-020)
   o.enableFileCheckpointing = true;
+  // AskUserQuestion (P06-S07): the CLI surfaces a structured multiple-choice question as a
+  // `request_user_dialog` of this kind. Declaring it here is what opts us in — the CLI fails
+  // closed on an undeclared kind (the question degrades to a plain refusal). onUserDialog (set
+  // in start(), needs the project id) renders the options as buttons and returns the choice.
+  o.supportedDialogKinds = [ASK_USER_QUESTION_DIALOG];
   return o;
+}
+
+// AskUserQuestion arrives as a user-dialog (not a canUseTool permission). We render its options
+// in the panel and answer with a PermissionResult carrying the picks, exactly as the CLI's own
+// inline answerer does: {behavior:'allow', updatedInput:{...input, answers:{[question]: label}}}.
+const ASK_USER_QUESTION_DIALOG = 'permission_ask_user_question';
+let dialogSeq = 0;
+const pendingDialogs = new Map();
+function makeOnUserDialog(id) {
+  return (request) => new Promise((resolve) => {
+    // Unrecognized kind → cancel so the CLI applies the dialog's default (protocol requirement).
+    if (!request || request.dialogKind !== ASK_USER_QUESTION_DIALOG) return resolve({ behavior: 'cancelled' });
+    const payload = request.payload || {};
+    const requestId = 'dlg-' + (++dialogSeq);
+    pendingDialogs.set(requestId, { id, resolve: (reply) => {
+      if (reply && reply.answers && !reply.cancelled) {
+        resolve({ behavior: 'completed', result: { behavior: 'allow',
+          updatedInput: { ...(payload.input || {}), answers: reply.answers } } });
+      } else resolve({ behavior: 'cancelled' }); // Skip → CLI records it as skipped and moves on.
+    } });
+    defaultSend('session:dialog-request', { requestId, id, questions: payload.questions || [] });
+  });
+}
+function resolveDialog(reply) {
+  const p = reply && pendingDialogs.get(reply.requestId);
+  if (p) { pendingDialogs.delete(reply.requestId); p.resolve(reply); }
+}
+function cancelDialogsFor(id) {
+  for (const [rid, p] of pendingDialogs) {
+    if (p.id === id) { pendingDialogs.delete(rid); p.resolve({ cancelled: true }); }
+  }
 }
 
 // Permission callback: allowlisted tools auto-run; anything else ASKS the panel and
@@ -184,6 +220,7 @@ function start({ id, cwd, prompt, options }, hooks = {}) {
   const input = inputQueue(prompt);
   const opts = sdkOptions(cwd, options);
   opts.canUseTool = makeCanUseTool(id);
+  opts.onUserDialog = makeOnUserDialog(id); // renders AskUserQuestion options as buttons (P06-S07)
   const entry = { q: null, input, aborted: false };
   sessions.set(id, entry);
   (async () => {
@@ -239,11 +276,12 @@ function stop(id) {
   entry.aborted = true;
   sessions.delete(id);
   denyPendingFor(id);
+  cancelDialogsFor(id); // a stopped session can't answer a parked question
   entry.input.close();
   try { settle(entry.q && entry.q.interrupt && entry.q.interrupt()); } catch { /* already ended */ }
   try { settle(entry.q && entry.q.return && entry.q.return()); } catch { /* already ended */ }
 }
 
 module.exports = { start, send, chat, stop, interrupt, currentSessionId, mcpStatus, mapMessage,
-  setQuery, getQuery, sdkOptions, modeToPermission, resolvePermission, setSink, defaultSend, sessions,
+  setQuery, getQuery, sdkOptions, modeToPermission, resolvePermission, resolveDialog, setSink, defaultSend, sessions,
   stepStartMessageId, rewindFiles };

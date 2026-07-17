@@ -113,6 +113,13 @@ details.think summary { cursor: pointer; opacity: .7; }
 .perm .row { display: flex; gap: 8px; margin-top: 8px; }
 .perm button { flex: 1; padding: 5px; border-radius: 4px; cursor: pointer; border: 1px solid var(--vscode-panel-border); font: inherit; }
 .perm button.allow { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
+/* AskUserQuestion option buttons (P06-S07) */
+.perm-q { margin: 8px 0; }
+.perm-qlabel { margin-bottom: 4px; }
+.perm-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.perm-opts button { flex: 0 1 auto; }
+.perm button.sel { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
+.perm button:disabled { opacity: .5; cursor: default; }
 
 /* ---- Composer ---- */
 .composer { position: relative; border-top: 1px solid var(--vscode-panel-border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }

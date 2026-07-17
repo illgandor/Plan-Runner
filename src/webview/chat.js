@@ -211,6 +211,7 @@
   // ---- SDK message handling (mirrors mapMessage output) ----
   function onSession(channel, payload) {
     if (channel === 'session:permission-request') return permission(payload);
+    if (channel === 'session:dialog-request') return askDialog(payload);
     if (channel !== 'session:message') return;
     const m = payload.msg;
     switch (m.type) {
@@ -246,6 +247,54 @@
     log.appendChild(el); scroll();
   }
   function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  // AskUserQuestion (P06-S07): render each question's options as clickable buttons instead of
+  // making you type the answer. Single-select radios (one pick), multiSelect toggles; Submit is
+  // enabled once every question has an answer. Skip cancels (the CLI records it as skipped).
+  function askDialog(p) {
+    const questions = p.questions || [];
+    const el = document.createElement('div');
+    el.className = 'perm';
+    const head = document.createElement('div'); head.textContent = 'Claude needs your input:';
+    el.appendChild(head);
+    const answers = {};   // question text -> chosen label (string) or labels (array, multiSelect)
+    const submit = document.createElement('button');
+    const answered = (q) => { const a = answers[q.question]; return Array.isArray(a) ? a.length > 0 : a != null; };
+    const refresh = () => { submit.disabled = questions.some((q) => !answered(q)); };
+    questions.forEach((q) => {
+      const qEl = document.createElement('div'); qEl.className = 'perm-q';
+      const label = document.createElement('div'); label.className = 'perm-qlabel'; label.textContent = q.question;
+      qEl.appendChild(label);
+      const opts = document.createElement('div'); opts.className = 'perm-opts';
+      (q.options || []).forEach((o) => {
+        const b = document.createElement('button');
+        b.textContent = o.label;
+        if (o.description) b.title = o.description;
+        b.onclick = () => {
+          if (q.multiSelect) {
+            const cur = answers[q.question] || (answers[q.question] = []);
+            const i = cur.indexOf(o.label);
+            if (i >= 0) { cur.splice(i, 1); b.classList.remove('sel'); } else { cur.push(o.label); b.classList.add('sel'); }
+          } else {
+            answers[q.question] = o.label;
+            opts.querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
+            b.classList.add('sel');
+          }
+          refresh();
+        };
+        opts.appendChild(b);
+      });
+      qEl.appendChild(opts); el.appendChild(qEl);
+    });
+    const row = document.createElement('div'); row.className = 'row';
+    submit.className = 'allow'; submit.textContent = 'Submit';
+    submit.onclick = () => { vscode.postMessage({ type: 'dialog', requestId: p.requestId, answers }); el.remove(); };
+    const skip = document.createElement('button'); skip.textContent = 'Skip';
+    skip.onclick = () => { vscode.postMessage({ type: 'dialog', requestId: p.requestId, cancelled: true }); el.remove(); };
+    row.append(submit, skip); el.appendChild(row);
+    refresh();
+    log.appendChild(el); scroll();
+  }
 
   // ---- Control messages from the extension ----
   window.addEventListener('message', (e) => {

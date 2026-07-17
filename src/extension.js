@@ -181,6 +181,9 @@ async function onMessage(m) {
     case 'permission':
       session.resolvePermission({ requestId: m.requestId, decision: m.decision });
       break;
+    case 'dialog': // AskUserQuestion answer/skip (P06-S07)
+      session.resolveDialog({ requestId: m.requestId, answers: m.answers, cancelled: m.cancelled });
+      break;
     case 'setEngine': {
       const next = ENGINES.includes(m.value) ? m.value : 'claude';
       if (next === 'codex' && !require('./codex-path').findCodex()) {
