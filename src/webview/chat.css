@@ -16,10 +16,12 @@ body {
 }
 .bar select, .bar button {
   font: inherit; color: var(--vscode-foreground);
-  background: var(--vscode-button-secondaryBackground, transparent);
-  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-dropdown-background, var(--vscode-button-secondaryBackground, transparent));
+  border: 1px solid var(--vscode-dropdown-border, transparent);
   border-radius: 4px; padding: 3px 8px; cursor: pointer;
 }
+/* P04-S07: Start + selects flex to fill whole rows, so the bar wraps into even rows at narrow width. */
+.bar select, .bar button.primary { flex: 1 1 88px; min-width: 88px; }
 .bar button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
 .bar button:hover { opacity: .9; }
 .bar .spacer { flex: 1; }
