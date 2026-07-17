@@ -4,6 +4,7 @@ dist/
 out/
 .DS_Store
 .plan-runner/
+.claude/
 
 # Vendored standalone Plan Runner — reference only, never shipped/committed
 # (root-anchored so it does NOT match planning/reference/)
