@@ -39,8 +39,18 @@ let view = null;        // the live WebviewView (null until the panel is opened)
 let runner = null;
 let usage = null;       // account-wide UsageService (one poller for the extension)
 let statusItem = null;
+let runningStep = null; // id shown in the status bar while a step is in flight (null = none)
+let lastNotify = null;  // dedupe key so a repeated transition doesn't re-fire an OS notification
 let state = { enabled: false, engine: 'claude', model: '(default)', effort: '(default)', mode: 'auto' };
 let skillNote = null;   // one-line result of the on-activate skill install, shown in the panel
+
+// One OS notification per transition (needs-you/paused warn, done info). Dedupe on `key` so a
+// repeated status doesn't spam; going active again (running/finalizing/resumed) clears the key.
+function notify(key, level, message) {
+  if (key === lastNotify) return;
+  lastNotify = key;
+  (level === 'info' ? vscode.window.showInformationMessage : vscode.window.showWarningMessage)(message);
+}
 
 function workspaceDir() {
   const f = vscode.workspace.workspaceFolders;
@@ -71,8 +81,9 @@ function usageConfig() {
 function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error }); }
 
 function updateStatusBar() {
-  statusItem.text = `$(${state.enabled ? 'play-circle' : 'circle-slash'}) Plan Runner: ${state.enabled ? 'On' : 'Off'}`;
-  statusItem.tooltip = 'Toggle Plan Runner auto-run for this workspace';
+  const base = `$(${state.enabled ? 'play-circle' : 'circle-slash'}) Plan Runner: ${state.enabled ? 'On' : 'Off'}`;
+  statusItem.text = runningStep ? `${base} — ${runningStep}` : base;
+  statusItem.tooltip = runningStep ? `Running ${runningStep}` : 'Toggle Plan Runner auto-run for this workspace';
   statusItem.show();
 }
 
@@ -91,12 +102,23 @@ function ensureRunner() {
   runner = new Runner(p);
   runner.finalizeMs = usageConfig().finalizeSec * 1000; // settle window between steps (S: finalizeQuietSeconds)
   runner.usageGate = usage; // S08: crossing the threshold pauses/resumes the loop
-  runner.on('status', (s) => post({ kind: 'status', ...s }));
+  runner.on('status', (s) => {
+    post({ kind: 'status', ...s });
+    if (s.step) runningStep = s.step;                                    // running/finalizing/needs-you carry the step
+    if (s.state === 'running' || s.state === 'finalizing') lastNotify = null; // active again → re-arm notifications
+    else if (s.state === 'needs-you') notify('needs-you:' + s.step, 'warn', `Plan Runner: ${s.detail || s.step + ' needs you'}`);
+    updateStatusBar();
+  });
   runner.on('step-started', (s) => post({ kind: 'step-started', ...s }));
   runner.on('step-done', (d) => post({ kind: 'step-done', ...d }));
-  runner.on('done', (d) => post({ kind: 'done', ...d }));
-  runner.on('paused', (d) => { post({ kind: 'paused', reason: d.reason }); postUsage(usage.snapshot()); });
-  runner.on('resumed', () => { post({ kind: 'resumed' }); postUsage(usage.snapshot()); });
+  runner.on('done', (d) => {
+    post({ kind: 'done', ...d });
+    runningStep = null; updateStatusBar();
+    if (d.state === 'done') notify('done', 'info', `Plan Runner: ${d.detail || 'run complete'}`);
+    else if (d.state === 'error') notify('error', 'warn', `Plan Runner: ${d.detail || 'run errored'}`);
+  });
+  runner.on('paused', (d) => { post({ kind: 'paused', reason: d.reason }); postUsage(usage.snapshot()); notify('paused', 'warn', `Plan Runner paused — ${d.reason}`); });
+  runner.on('resumed', () => { post({ kind: 'resumed' }); postUsage(usage.snapshot()); lastNotify = null; });
   return runner;
 }
 
