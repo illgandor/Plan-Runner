@@ -124,8 +124,9 @@
   function toolUse(msg) {
     const el = ensureAssistant();
     const d = document.createElement('details'); d.className = 'tool';
-    d.innerHTML = `<summary>🔧 <span class="tool-name"></span></summary>`;
+    d.innerHTML = `<summary><span class="tool-status">⏳</span> <span class="tool-name"></span> <span class="tool-target"></span></summary>`;
     d.querySelector('.tool-name').textContent = msg.name;
+    d.querySelector('.tool-target').textContent = toolTarget(msg.input);   // path/command in the collapsed summary (P04-S03)
     const input = msg.input || {};
     if (input && (msg.name === 'Edit' || msg.name === 'Write' || msg.name === 'MultiEdit')) {
       d.appendChild(editDiff(msg.name, input));   // red/green line diff, not raw JSON (P04-S02)
@@ -137,6 +138,13 @@
     el.appendChild(d);
     toolEls.set(msg.toolUseId, d);
     scroll();
+  }
+  // The first meaningful input value for a collapsed tool row: file path or command, else first string (P04-S03).
+  function toolTarget(input) {
+    if (!input || typeof input !== 'object') return '';
+    const v = input.file_path || input.path || input.command || input.pattern ||
+      Object.values(input).find((x) => typeof x === 'string' && x);
+    return typeof v === 'string' ? (v.length > 80 ? v.slice(0, 80) + '…' : v) : '';
   }
   // Render a file-edit tool's input as a line-based red/green diff — no diff library (P04-S02).
   // Edit → old red / new green; Write → all green; MultiEdit → each edit in sequence.
@@ -175,6 +183,9 @@
   function toolResult(msg) {
     const d = toolEls.get(msg.toolUseId);
     if (!d) return;
+    const status = d.querySelector('.tool-status');
+    if (status) status.textContent = msg.isError ? '⛔' : '✔';   // ⏳ → ✔/⛔ in the collapsed summary (P04-S03)
+    if (msg.isError) d.open = true;                              // failures self-expand
     const body = document.createElement('div');
     body.className = 'tool-body';
     setCapped(body, (msg.isError ? '⛔ ' : '') + String(msg.result || ''));
