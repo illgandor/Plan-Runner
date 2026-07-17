@@ -22,7 +22,7 @@
       <div class="gauge tokrow" id="tokrow" style="display:none" title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
       <label class="thresh" title="Pause the loop at this account-usage % (applies to all windows)">Pause @ <input id="thresh" type="number" min="10" max="100" step="1">%</label>
     </div>
-    <div class="status" id="status">Idle</div>
+    <div class="status" id="status" aria-live="polite">Idle</div>
     <div id="log"></div>
     <div class="composer">
       <button id="jump" class="jump" hidden>↓ New</button>

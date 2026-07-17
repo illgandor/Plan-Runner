@@ -8,6 +8,10 @@ body {
   background: var(--vscode-sideBar-background);
 }
 #app { display: flex; flex-direction: column; height: 100vh; }
+/* P04-S08: visible keyboard focus (mouse clicks unaffected via :focus-visible). */
+button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px;
+}
 
 /* ---- Top controls ---- */
 .bar {
