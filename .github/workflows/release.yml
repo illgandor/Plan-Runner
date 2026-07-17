@@ -24,6 +24,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Syntax gate
+        run: npm run check:syntax
+
+      - name: Unit gate
+        run: npm test
+
       - name: Package the .vsix
         run: npx vsce package
 
