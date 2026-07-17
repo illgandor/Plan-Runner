@@ -8,8 +8,8 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { findClaude } = require('./claude-path');
 
-const CLAUDE = process.env.PLANRUNNER_CLAUDE || (process.platform === 'win32' ? 'claude.exe' : 'claude');
 const SESSION_RE = /Current session:\s*(\d+)%/;
 const WEEK_RE = /Current week \(all models\):\s*(\d+)%/;
 
@@ -42,9 +42,11 @@ function cleanupUsageSession(sessionId) {
 // received in 3s" stall the prototype hit calling claude non-interactively.
 function defaultFetch() {
   return new Promise((resolve) => {
+    const claude = findClaude(); // env → PATH → bundled fallback (same resolver as the SDK, D-019)
+    if (!claude) return resolve({ error: 'claude not found' }); // keeps last-good; never spawns null
     let out = '';
     let p;
-    try { p = spawn(CLAUDE, ['-p', '/usage', '--output-format', 'json'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
+    try { p = spawn(claude, ['-p', '/usage', '--output-format', 'json'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch (e) { return resolve({ error: e.message }); }
     p.stdout.on('data', (d) => { out += d; });
     p.on('error', (e) => resolve({ error: e.message }));

@@ -4,6 +4,13 @@
 // per project id; the autonomous Runner reuses this with a FRESH session per step, and
 // answering a "needs you" prompt continues the SAME live session (streaming input mode).
 const { ALLOWED_TOOLS } = require('./constants');
+const { findClaude } = require('./claude-path');
+
+// Shown once when no claude binary resolves (env/PATH/bundle all absent) — never start a
+// session we can't run (D-019). Flag makes it one-time so a missing install doesn't spam every step.
+const CLAUDE_MISSING_NOTICE = 'Claude Code was not found. Install it and ensure `claude` is on your ' +
+  'PATH (or set PLANRUNNER_CLAUDE), then start the step again.';
+let claudeMissingNotified = false;
 
 // The SDK is ESM-only — load via dynamic import(); require() throws ERR_REQUIRE_ESM.
 // Lazy so a fake can be injected (setQuery) for tests and a load error surfaces as a
@@ -100,14 +107,16 @@ function inputQueue(firstText) {
 const MODE_TO_PERMISSION = { auto: 'auto', manual: 'default', acceptEdits: 'acceptEdits', plan: 'plan', default: 'default' };
 function modeToPermission(mode) { return MODE_TO_PERMISSION[mode] || 'default'; }
 
-// SDK query options. Unlike the Electron app we do NOT rewrite the CLI binary path: a
-// .vsix ships node_modules unpacked, so the SDK self-resolves its bundled claude binary
-// (the asar hack was Electron-only). settingSources loads the user's ~/.claude auth +
-// MCP servers + project settings — this is what runs the SDK on the Claude subscription
-// (no ANTHROPIC_API_KEY), and makes their configured MCP servers connect.
+// SDK query options. We resolve the claude binary ourselves (findClaude: env → PATH →
+// bundled fallback) and pass it as pathToClaudeCodeExecutable, symmetric with Codex (D-019);
+// when null (bundle dropped + none installed) start() bails with a notice before we get here.
+// settingSources loads the user's ~/.claude auth + MCP servers + project settings — this is
+// what runs the SDK on the Claude subscription (no ANTHROPIC_API_KEY) and connects their MCP.
 function sdkOptions(cwd, options = {}) {
   const o = { cwd, includePartialMessages: true, settingSources: ['project', 'user'],
     permissionMode: modeToPermission(options.permissionMode), allowedTools: ALLOWED_TOOLS };
+  const claudePath = options.claudePath !== undefined ? options.claudePath : findClaude();
+  if (claudePath) o.pathToClaudeCodeExecutable = claudePath;
   if (options.model && options.model !== '(default)') o.model = options.model;
   // Reasoning effort ('low'|'medium'|'high'|'xhigh'|'max'). Models that don't support it
   // (e.g. haiku) silently downgrade, so it's safe to always pass when set.
@@ -215,10 +224,18 @@ async function rewindFiles(id, userMessageId) {
 // when the stream ends. Keeps the session live by id.
 function start({ id, cwd, prompt, options }, hooks = {}) {
   if (sessions.has(id)) stop(id); // one live session per project id
-  stepStartMsg.delete(id); // fresh session → capture this step's step-start message anew (P06-S06)
   const send = hooks.send || defaultSend;
+  // Never start an unrunnable session: no claude on PATH AND no bundle → notice, don't spawn (D-019).
+  const claudePath = findClaude();
+  if (!claudePath) {
+    if (!claudeMissingNotified) { claudeMissingNotified = true;
+      send('session:message', { id, msg: { type: 'error', message: CLAUDE_MISSING_NOTICE } }); }
+    hooks.onDone && hooks.onDone();
+    return null;
+  }
+  stepStartMsg.delete(id); // fresh session → capture this step's step-start message anew (P06-S06)
   const input = inputQueue(prompt);
-  const opts = sdkOptions(cwd, options);
+  const opts = sdkOptions(cwd, { ...options, claudePath });
   opts.canUseTool = makeCanUseTool(id);
   opts.onUserDialog = makeOnUserDialog(id); // renders AskUserQuestion options as buttons (P06-S07)
   const entry = { q: null, input, aborted: false };
