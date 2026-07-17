@@ -124,12 +124,44 @@
   function toolUse(msg) {
     const el = ensureAssistant();
     const d = document.createElement('details'); d.className = 'tool';
-    d.innerHTML = `<summary>🔧 <span class="tool-name"></span></summary><div class="tool-body"></div>`;
+    d.innerHTML = `<summary>🔧 <span class="tool-name"></span></summary>`;
     d.querySelector('.tool-name').textContent = msg.name;
-    setCapped(d.querySelector('.tool-body'), JSON.stringify(msg.input || {}, null, 2));
+    const input = msg.input || {};
+    if (input && (msg.name === 'Edit' || msg.name === 'Write' || msg.name === 'MultiEdit')) {
+      d.appendChild(editDiff(msg.name, input));   // red/green line diff, not raw JSON (P04-S02)
+    } else {
+      const body = document.createElement('div'); body.className = 'tool-body';
+      setCapped(body, JSON.stringify(input, null, 2));
+      d.appendChild(body);
+    }
     el.appendChild(d);
     toolEls.set(msg.toolUseId, d);
     scroll();
+  }
+  // Render a file-edit tool's input as a line-based red/green diff — no diff library (P04-S02).
+  // Edit → old red / new green; Write → all green; MultiEdit → each edit in sequence.
+  function editDiff(name, input) {
+    const wrap = document.createElement('div');
+    wrap.className = 'diff';
+    if (input.file_path) {
+      const p = document.createElement('div'); p.className = 'diff-path';
+      p.textContent = input.file_path; wrap.appendChild(p);
+    }
+    const rows = [];
+    const add = (text, cls) => String(text == null ? '' : text).split('\n').forEach((l) => rows.push([cls, l]));
+    if (name === 'Write') add(input.content, 'add');
+    else if (name === 'MultiEdit') (input.edits || []).forEach((e) => { add(e.old_string, 'del'); add(e.new_string, 'add'); });
+    else { add(input.old_string, 'del'); add(input.new_string, 'add'); }
+    const CAPL = 300;   // ponytail: line cap so a whole-file Write can't bloat the DOM; the JSON path caps too
+    rows.slice(0, CAPL).forEach(([cls, l]) => {
+      const row = document.createElement('div'); row.className = 'diff-line ' + cls;
+      row.textContent = (cls === 'del' ? '- ' : '+ ') + l; wrap.appendChild(row);
+    });
+    if (rows.length > CAPL) {
+      const more = document.createElement('div'); more.className = 'diff-more';
+      more.textContent = `… ${rows.length - CAPL} more lines`; wrap.appendChild(more);
+    }
+    return wrap;
   }
   // Inline auto-review note (Codex escalate→retry): a small line inside the assistant group so a
   // silent retry reads as "🔍 reviewed permission: … → approved" instead of an unexplained gap.

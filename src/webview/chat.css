@@ -82,6 +82,14 @@ details.think summary { cursor: pointer; opacity: .7; }
 .review-note { margin-top: 6px; font-size: 12px; opacity: .8; font-family: var(--vscode-editor-font-family, monospace); }
 .tool-body .more { display: block; margin-top: 4px; font: inherit; cursor: pointer; padding: 1px 6px;
   color: var(--vscode-textLink-foreground); background: transparent; border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
+/* Inline red/green edit diff (P04-S02) — line-based, VS Code diff bg tokens. */
+.diff { margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--vscode-panel-border);
+  font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; }
+.diff-path { opacity: .7; margin-bottom: 2px; }
+.diff-line { padding: 0 4px; }
+.diff-line.del { background: var(--vscode-diffEditor-removedTextBackground); }
+.diff-line.add { background: var(--vscode-diffEditor-insertedTextBackground); }
+.diff-more { opacity: .7; padding: 2px 4px; }
 
 .perm {
   align-self: stretch; padding: 10px; border-radius: 8px;
