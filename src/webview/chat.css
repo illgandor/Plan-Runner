@@ -106,6 +106,15 @@ details.think summary { cursor: pointer; opacity: .7; }
 /* ---- Composer ---- */
 .composer { position: relative; border-top: 1px solid var(--vscode-panel-border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 
+/* Jump-to-latest button (P04-S05) — floats above the composer while the log is scrolled up. */
+.jump {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 4px); z-index: 5;
+  font: inherit; font-size: 11px; padding: 3px 12px; border-radius: 12px; cursor: pointer;
+  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+  border: 1px solid transparent; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+.jump:hover { opacity: .9; }
+
 /* In-composer MCP popover — floats above the composer, not a modal (P02-S07) */
 .mcpmenu {
   position: absolute; left: 8px; right: 8px; bottom: calc(100% - 4px); z-index: 5;

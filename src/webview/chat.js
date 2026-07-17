@@ -25,6 +25,7 @@
     <div class="status" id="status">Idle</div>
     <div id="log"></div>
     <div class="composer">
+      <button id="jump" class="jump" hidden>↓ New</button>
       <div id="mcpmenu" class="mcpmenu" hidden></div>
       <textarea id="input" placeholder="Message Claude, or answer a step's question…"></textarea>
       <div class="row">
@@ -45,7 +46,15 @@
 
   // ---- Rendering helpers ----
   const CAP = 4000;               // chars shown before a "show more" reveals the rest
-  function scroll() { log.scrollTop = log.scrollHeight; }
+  // Sticky-to-bottom (P04-S05): only autoscroll while the view is pinned near the bottom, so
+  // scrolling up mid-turn isn't yanked back. `stuck` tracks intent via the scroll event.
+  let stuck = true;
+  const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.addEventListener('scroll', () => { stuck = nearBottom(); if (stuck) $('jump').hidden = true; });
+  function scroll(force) {
+    if (force || stuck) { log.scrollTop = log.scrollHeight; $('jump').hidden = true; }
+    else $('jump').hidden = false;   // detached + new content → offer the jump-to-latest button
+  }
   // Fill el with text, but cap huge tool output behind a "show more" instead of silently truncating.
   function setCapped(el, text) {
     if (text.length <= CAP) { el.textContent = text; return; }
@@ -369,9 +378,11 @@
   function send() {
     const ta = $('input'); const text = ta.value.trim();
     if (!text) return;
+    stuck = true;   // sending your own message always pins back to the latest
     bubble('user', text); ta.value = ''; cur = null;
     vscode.postMessage({ type: 'send', text });
   }
+  $('jump').onclick = () => scroll(true);   // jump back to latest and re-stick
   $('send').onclick = send;
   $('input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
