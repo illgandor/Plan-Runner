@@ -376,8 +376,9 @@ def check_plans(root: Path, hashes, progress_text):
         if status in ("LOCKED", "COMPLETE"):
             rel = f"planning/plans/{f.name}"
             if rel not in hashes:
-                add("WARN", f"{f.name} hash recorded",
-                    "not in plan-hashes.json — run --update-hashes after locking")
+                add("FAIL", f"{f.name} hash recorded",
+                    "not in plan-hashes.json — a LOCKED/COMPLETE plan with no"
+                    " recorded hash has no immutability guard; run --update-hashes")
             elif hashes[rel] != sha256(f):
                 add("FAIL", f"{f.name} immutability",
                     "hash mismatch — a LOCKED plan was edited. Revert, or record the"
