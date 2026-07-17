@@ -3,6 +3,7 @@ node_modules/
 dist/
 out/
 .DS_Store
+.plan-runner/
 
 # Vendored standalone Plan Runner — reference only, never shipped/committed
 # (root-anchored so it does NOT match planning/reference/)

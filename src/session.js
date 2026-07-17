@@ -62,7 +62,8 @@ function mapMessage(m) {
     const u = m.usage || {};
     const ctx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
     return [{ type: 'result', subtype: m.subtype, text: m.result || '', costUsd: m.total_cost_usd,
-      contextTokens: ctx || null }];
+      contextTokens: ctx || null, numTurns: m.num_turns != null ? m.num_turns : null,
+      durationMs: m.duration_ms != null ? m.duration_ms : null }];
   }
   return [];
 }

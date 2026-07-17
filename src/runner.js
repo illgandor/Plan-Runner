@@ -15,6 +15,8 @@
 // A generation counter invalidates stale callbacks from a torn-down step.
 const { EventEmitter } = require('events');
 const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const { STEP_PROMPT, CODEX_STEP_SUFFIX, MASTER_PLAN_PROMPT } = require('./constants');
 const { readPointer } = require('./progress');
 const session = require('./session');
@@ -33,6 +35,18 @@ function gitState(cwd) {
     try { pushed = git(['rev-list', '--count', '@{u}..HEAD']) === '0'; } catch { pushed = true; } // no upstream → n/a
     return { clean, pushed };
   } catch { return { clean: true, pushed: true }; } // not a git repo → don't block
+}
+
+// Per-step run ledger (P05-S07, D-017): append one JSON line per completed step to
+// <cwd>/.plan-runner/runs.jsonl so "what did it do while I slept?" survives session teardown.
+// Best-effort — a write failure is swallowed and never blocks or delays the loop. Exported
+// for the runner method + tests. `.plan-runner/` is git-ignored.
+function appendLedger(cwd, record) {
+  try {
+    const dir = path.join(cwd, '.plan-runner');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'runs.jsonl'), JSON.stringify(record) + '\n');
+  } catch { /* best-effort: a ledger write never affects the run */ }
 }
 
 // Optional wall-clock ceiling (planRunner.stopAtTime, "HH:MM"). Pure so it's testable with an
@@ -96,6 +110,9 @@ class Runner extends EventEmitter {
     this._retries = 0;           // error-retry attempts spent on the current step (reset per step)
     this.retryBackoffMs = RETRY_BACKOFF_MS; // per-attempt backoff base; overridable in tests
     this._retryTimer = null;
+    this._stepStartedAtMs = 0;   // wall-clock the current step first started (survives retries)
+    this._lastResult = null;     // last `result` msg of the current step → ledger tokens/turns/cost
+    this.appendLedger = appendLedger; // per-step run ledger writer; overridable in tests
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -178,6 +195,8 @@ class Runner extends EventEmitter {
     this.paused = false;
     this._advancedPlan = false; // a real step to run → reset the master-plan-once guard
     this._retries = 0;          // fresh step off the loop → fresh error-retry budget
+    this._stepStartedAtMs = this.now(); // true step start (retries reuse it, so the ledger spans them)
+    this._lastResult = null;
     this.emit('status', { state: 'running', step: stepId, detail: `Running ${stepId}` });
     this.emit('step-started', { step: stepId });
     this._startSession(stepId, this._stepPrompt(), null);
@@ -220,6 +239,7 @@ class Runner extends EventEmitter {
       session.defaultSend(channel, payload); // → panel (render), same as v2's sdkDriver
       if (gen !== this._gen || channel !== 'session:message') return;
       const t = payload.msg.type;
+      if (t === 'result') this._lastResult = payload.msg; // keep for the run ledger at step-done
       if (t === 'result' || t === 'error') this._onTurnEnd(stepId, gen, t === 'error');
       else if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
     };
@@ -241,7 +261,10 @@ class Runner extends EventEmitter {
       return setImmediate(() => this._runNext());
     }
     const after = readPointer(this.project.path);
-    if (after && after !== stepId) return this._beginFinalize(stepId, gen); // work done → settle, then advance
+    if (after && after !== stepId) { // pointer advanced = the step's work is done
+      this._recordStep(stepId);
+      return this._beginFinalize(stepId, gen); // settle, then advance
+    }
     // Pointer unchanged. A clean result = Claude is waiting on you. An error tore the session
     // down — retry the step in a fresh session up to the bound before dropping to needs-you.
     if (isError && this._retries < MAX_RETRIES) return this._retryStep(stepId);
@@ -250,6 +273,25 @@ class Runner extends EventEmitter {
       ? `${stepId}: errored (retried ${this._retries}×) — answer in the panel to continue, or Stop`
       : `${stepId}: waiting on you — answer in the panel`;
     this.emit('status', { state: 'needs-you', step: stepId, detail });
+  }
+
+  // Append one run-ledger record for a completed step (§Result event + run ledger, D-017).
+  // Best-effort: appendLedger swallows any failure, so this never blocks or delays the loop.
+  _recordStep(stepId) {
+    const r = this._lastResult || {};
+    const tokens = r.turnTokens != null ? r.turnTokens : (r.contextTokens != null ? r.contextTokens : null);
+    this.appendLedger(this.project.path, {
+      stepId,
+      engine: this.project.engine || 'claude',
+      model: this.project.model,
+      effort: this.project.effort,
+      startedAt: new Date(this._stepStartedAtMs || this.now()).toISOString(),
+      endedAt: new Date(this.now()).toISOString(),
+      numTurns: r.numTurns != null ? r.numTurns : null,
+      tokens,
+      costUsd: r.costUsd != null ? r.costUsd : null,
+      outcome: 'done',
+    });
   }
 
   // Error retry (P05-S05): the errored session is already gone, so a bounded fresh session
@@ -357,4 +399,4 @@ class Runner extends EventEmitter {
   }
 }
 
-module.exports = { Runner, MAX_STEPS, MAX_RETRIES, RESUME_PROMPT, gitState, stopTimeReached };
+module.exports = { Runner, MAX_STEPS, MAX_RETRIES, RESUME_PROMPT, gitState, stopTimeReached, appendLedger };
