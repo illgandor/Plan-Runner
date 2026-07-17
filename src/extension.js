@@ -241,6 +241,7 @@ function html(webview) {
     <link rel="stylesheet" href="${uri('chat.css')}">
   </head><body>
     <div id="app" data-logo="${uri('logo.png')}"></div>
+    <script nonce="${nonce}" src="${uri('markdown.js')}"></script>
     <script nonce="${nonce}" src="${uri('chat.js')}"></script>
   </body></html>`;
 }

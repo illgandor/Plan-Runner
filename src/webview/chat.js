@@ -92,6 +92,24 @@
     el.appendChild(document.createTextNode(t));
     scroll();
   }
+  // Re-render a finished assistant bubble's streamed plain text as sanitized markdown (D-015).
+  // Replaces each run of adjacent text nodes in place; leaves think/tool/note children untouched.
+  function finalizeMd(el) {
+    if (!el || el.dataset.md || !window.renderMarkdown) return;
+    el.dataset.md = '1';
+    let group = [];
+    const flush = () => {
+      if (!group.length) return;
+      const text = group.map((n) => n.textContent).join('');
+      if (text.trim()) el.insertBefore(window.renderMarkdown(text), group[0]);
+      group.forEach((n) => n.remove());
+      group = [];
+    };
+    Array.from(el.childNodes).forEach((n) => {
+      if (n.nodeType === Node.TEXT_NODE) group.push(n); else flush();
+    });
+    flush();
+  }
   function appendThinking(t) {
     const el = ensureAssistant();
     let d = el.querySelector('details.think');
@@ -140,8 +158,8 @@
       case 'init': break; // MCP status lives in the 🔌 button now — no per-session/reply banner
       case 'text-delta': appendText(m.text); if (cur) cur.dataset.delta = '1'; break; // mark: streamed live
       case 'assistant-text':
-        if (cur && cur.dataset.delta) { cur = null; break; }  // Claude already streamed this via text-delta — skip the dupe
-        cur = null; appendText(m.text);                        // Codex (no deltas) / non-streamed reply — render as its own bubble
+        if (cur && cur.dataset.delta) { finalizeMd(cur); cur = null; break; }  // streamed via text-delta — render, skip the dupe text
+        cur = null; appendText(m.text); finalizeMd(cur);       // Codex (no deltas) / non-streamed reply — own bubble, render now
         break;
       case 'thinking': appendThinking(m.text); break;
       case 'tool-use': toolUse(m); break;
@@ -150,6 +168,7 @@
       case 'result':
         if (m.contextTokens) { const c = $('ctx'); c.hidden = false; c.textContent = 'ctx ' + fmt(m.contextTokens); }
         if (m.turnTokens) { sessionTokens += m.turnTokens; $('tokval').textContent = fmt(sessionTokens); } // Codex counter
+        finalizeMd(cur);                           // backstop: render any bubble that streamed without a trailing assistant-text
         cur = null; toolEls.clear();               // finalize this turn's group
         break;
       case 'error': bubble('error', m.message || 'Error'); cur = null; break;
