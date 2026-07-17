@@ -167,7 +167,7 @@ class Runner extends EventEmitter {
     const gen = ++this._gen;
     this.currentStep = stepId;
     this._turnLive = true;
-    const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode };
+    const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode, maxTurns: this.project.maxTurns };
     if (resumeId) options.resume = resumeId;
     this._provider.start({ id: this.id, cwd: this.project.path, prompt, options }, { send: this._wrapSend(stepId, gen) });
   }
@@ -292,7 +292,7 @@ class Runner extends EventEmitter {
     const stepId = this.currentStep;
     this.emit('status', { state: 'running', step: stepId, detail: `Continuing ${stepId}…` });
     const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode,
-      resume: this._provider.currentSessionId(this.id) || undefined };
+      maxTurns: this.project.maxTurns, resume: this._provider.currentSessionId(this.id) || undefined };
     this._provider.chat({ id: this.id, cwd: this.project.path, prompt: text, options }, { send: this._wrapSend(stepId, this._gen) });
   }
 }

@@ -114,6 +114,10 @@ function sdkOptions(cwd, options = {}) {
   // Resume a prior session by id (SDK options.resume) — how pause/resume re-enters the
   // SAME step turn after an interrupt. Omitted when absent so a fresh step starts clean.
   if (options.resume) o.resume = options.resume;
+  // Optional per-step turn ceiling (planRunner.maxTurns). Off by default (0); passed only
+  // when >0 so an unset cap never constrains the SDK. At the cap the query ends → existing
+  // _onTurnEnd routes to needs-you rather than the step looping tools unbounded. (D-016)
+  if (options.maxTurns > 0) o.maxTurns = options.maxTurns;
   return o;
 }
 

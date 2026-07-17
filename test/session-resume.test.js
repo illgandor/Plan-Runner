@@ -9,6 +9,12 @@ test('sdkOptions includes resume iff passed', () => {
   assert.ok(!('resume' in session.sdkOptions('/cwd', {})), 'default omits resume');
 });
 
+test('sdkOptions includes maxTurns only when >0 (P05-S03)', () => {
+  assert.strictEqual(session.sdkOptions('/cwd', { maxTurns: 5 }).maxTurns, 5);
+  assert.ok(!('maxTurns' in session.sdkOptions('/cwd', { maxTurns: 0 })), '0 = off, omitted');
+  assert.ok(!('maxTurns' in session.sdkOptions('/cwd', {})), 'unset omits maxTurns');
+});
+
 test('currentSessionId returns the id captured from a fake init', async () => {
   // Fake query yields one init message carrying session_id, then ends.
   session.setQuery(() => (async function* () {

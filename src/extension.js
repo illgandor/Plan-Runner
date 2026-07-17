@@ -49,7 +49,8 @@ function workspaceDir() {
 function project() {
   const dir = workspaceDir();
   if (!dir) return null;
-  return { id: dir, path: dir, name: path.basename(dir), engine: state.engine, model: state.model, effort: state.effort, mode: state.mode };
+  return { id: dir, path: dir, name: path.basename(dir), engine: state.engine, model: state.model, effort: state.effort, mode: state.mode,
+    maxTurns: vscode.workspace.getConfiguration('planRunner').get('maxTurns', 0) };
 }
 function post(msg) { if (view) view.webview.postMessage(msg); }
 // Repopulate the webview's engine + model/effort/permission dropdowns for the current engine.
