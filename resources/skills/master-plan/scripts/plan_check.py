@@ -262,16 +262,28 @@ def check_progress(root: Path):
             add("WARN", "Blockers holds open items only",
                 f"{len(stale)} resolved-looking line(s) — delete them")
 
-    # staleness tripwire
+    # staleness tripwire — WARN only if the recorded sha is NOT an ancestor of
+    # HEAD (divergent/unknown), or is >2 commits behind. Exact-equality cried
+    # wolf on every clean close-out (the doc-closeout commit is 1 past the step
+    # commit recorded in Updated:). (P06-S02)
     m = re.search(r"HEAD: ([0-9a-f]{7,})", text)
     if m:
+        rec = m.group(1)
         try:
-            head = subprocess.run(["git", "rev-parse", "--short=7", "HEAD"],
-                                  cwd=root, capture_output=True, text=True, timeout=10)
-            if head.returncode == 0 and not head.stdout.strip().startswith(m.group(1)[:7]):
+            anc = subprocess.run(["git", "merge-base", "--is-ancestor", rec, "HEAD"],
+                                 cwd=root, capture_output=True, timeout=10)
+            if anc.returncode == 0:
+                cnt = subprocess.run(["git", "rev-list", "--count", f"{rec}..HEAD"],
+                                     cwd=root, capture_output=True, text=True, timeout=10)
+                behind = int(cnt.stdout.strip()) if cnt.returncode == 0 and cnt.stdout.strip() else 0
+                if behind > 2:
+                    add("WARN", "dashboard staleness",
+                        f"Updated sha {rec[:7]} is {behind} commits behind git HEAD")
+            elif anc.returncode == 1:
                 add("WARN", "dashboard staleness",
-                    f"Updated line says {m.group(1)[:7]}, git HEAD is {head.stdout.strip()}")
-        except (OSError, subprocess.TimeoutExpired):
+                    f"Updated sha {rec[:7]} is not an ancestor of git HEAD")
+            # any other exit code = git error (bad object / shallow clone) → stay quiet
+        except (OSError, subprocess.TimeoutExpired, ValueError):
             pass
     return text
 
@@ -347,6 +359,15 @@ def check_plans(root: Path, hashes, progress_text):
                     add("WARN", f"step {sid} DoD decidable",
                         f"undecided-choice phrase (either…or/and-or/TBD/decide"
                         f" later/if the owner): {ln.strip()[:60]}")
+            # forward-dep guard: a same-plan dep that sorts AFTER this step is a
+            # forward reference (conversion-rules forbids it). Cross-plan deps
+            # are legal. IDs are fixed-width so string compare orders them. (P06-S02)
+            dep_m = re.search(r"\[deps:\s*([^\]]*)\]", lines[i])
+            if dep_m:
+                for dep in re.findall(r"P\d{2}-S\d{2}[ab]?", dep_m.group(1)):
+                    if dep.startswith(f"P{nn}-") and dep > sid:
+                        add("FAIL", f"step {sid} no forward dep",
+                            f"depends on {dep}, which sorts after it in the same plan")
 
         if status == "LOCKED":
             # every LOCKED plan's per-step state must be visible somewhere:
