@@ -55,6 +55,11 @@ body {
 .msg.user { background: var(--vscode-button-background); color: var(--vscode-button-foreground); align-self: flex-end; max-width: 85%; }
 .msg.assistant { background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); }
 .msg.system { font-size: 12px; opacity: .7; align-self: center; text-align: center; }
+/* Step-transition chip: centered badge label with thin rules flanking it (P04-S06). */
+.msg.step { align-self: stretch; display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.msg.step::before, .msg.step::after { content: ""; flex: 1; height: 1px; background: var(--vscode-panel-border); }
+.step-label { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+  background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); white-space: nowrap; }
 .msg.error { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100); }
 
 /* Rendered markdown (P04-S01): tight block spacing, real code blocks. */

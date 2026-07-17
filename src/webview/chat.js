@@ -73,6 +73,12 @@
     return el;
   }
   function system(text) { bubble('system', text); }
+  function stepChip(text) {   // step-started/step-done timeline divider: badged label + flanking rules (P04-S06)
+    const el = bubble('step', null);
+    const label = document.createElement('span');
+    label.className = 'step-label'; label.textContent = text;
+    el.appendChild(label); scroll();
+  }
   // First block in the log: Workspace/NEXT line + logo, in normal flow so chat pushes it off-screen.
   function splash(text) {
     let s = $('splash');
@@ -255,8 +261,8 @@
         setStatus(d); running = d.state === 'running' || d.state === 'needs-you' || d.state === 'finalizing'; reflect();
         if (d.state === 'needs-you') { const el = ensureAssistant(); } // keep group open for the answer
         break;
-      case 'step-started': system('▶ ' + (d.step || 'step')); cur = null; break;
-      case 'step-done': system(`✔ ${d.from} → ${d.to}`); cur = null; break;
+      case 'step-started': stepChip('▶ ' + (d.step || 'step')); cur = null; break;
+      case 'step-done': stepChip(`✔ ${d.from} → ${d.to}`); cur = null; break;
       case 'done': system('■ ' + (d.detail || d.state)); running = false; reflect(); break;
       case 'usage': usage(d); break;
       case 'paused': setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
