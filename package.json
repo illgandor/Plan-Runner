@@ -4,7 +4,7 @@
   "version": "0.1.12",
   "description": "An SDK chat panel that autonomously drives a master-plan project — one fresh Claude context window per step, right inside VS Code.",
   "publisher": "notacult",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "private": true,
   "engines": {
     "vscode": "^1.85.0"
