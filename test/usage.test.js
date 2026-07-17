@@ -45,3 +45,27 @@ test('a spawn/parse error also keeps last-good', async () => {
   assert.strictEqual(svc.error, 'boom');
   assert.strictEqual(svc.isOverThreshold(), false, '71 < 90 threshold');
 });
+
+// P05-S02: stop() during an in-flight poll must not re-arm the timer (was leaking a poller
+// on engine-switch — the fetch resolved after stop() and armed a fresh setTimeout).
+test('stop() during an in-flight poll does not re-arm the timer', async () => {
+  let resolveFetch;
+  const svc = new UsageService({ fetch: () => new Promise((r) => { resolveFetch = r; }) });
+  svc.start();                              // _tick now awaiting fetch (in flight)
+  svc.stop();                               // stop mid-flight
+  resolveFetch({ session: 42, week: 71 });
+  await new Promise((r) => setImmediate(r)); // let _tick's continuation run
+  assert.strictEqual(svc._timer, null, 'no timer re-armed after stop()');
+});
+
+// P05-S02: start() while a poll is already in flight must not spawn a second loop.
+test('start() twice does not spawn a second poll loop', async () => {
+  let calls = 0; let resolveFetch;
+  const svc = new UsageService({ fetch: () => { calls++; return new Promise((r) => { resolveFetch = r; }); } });
+  svc.start();
+  svc.start();                              // second start while the first poll is in flight
+  assert.strictEqual(calls, 1, 'only one fetch in flight — no second loop');
+  svc.stop();
+  resolveFetch({ session: 1, week: 1 });
+  await new Promise((r) => setImmediate(r));
+});

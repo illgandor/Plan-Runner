@@ -4,7 +4,7 @@
 // mcp_tool_call/error are the documented shapes. Stdlib only, spends no usage. (P02-S04)
 const test = require('node:test');
 const assert = require('node:assert');
-const { mapCodexEvent, reviewNote } = require('../src/codex');
+const { mapCodexEvent, reviewNote, exitError } = require('../src/codex');
 
 test('thread.started → init carrying the thread id (currentSessionId source)', () => {
   assert.deepStrictEqual(
@@ -104,6 +104,18 @@ test('reviewNote stays silent for plain failures, plain successes, and command a
   const arr = {};
   reviewNote(arr, { type: 'command_execution', command: ['git', 'push'], exit_code: 1 });
   assert.match(reviewNote(arr, { type: 'command_execution', command: ['git', 'push'], exit_code: 0 }), /git push/);
+});
+
+// P05-S02: interrupt() marks the entry aborted, so the child `close` emits no bogus "codex
+// exited" on a usage-pause. exitError is the guard the close handler consumes.
+test('exitError stays silent for an aborted (usage-paused) or already-resulted turn', () => {
+  assert.strictEqual(exitError({ aborted: true, gotResult: false }, 'boom', 1), null);
+  assert.strictEqual(exitError({ aborted: false, gotResult: true }, '', 1), null);
+});
+
+test('exitError surfaces stderr (or an exit code) for a real crash', () => {
+  assert.strictEqual(exitError({ aborted: false, gotResult: false }, ' auth failed \n', 7), 'auth failed');
+  assert.strictEqual(exitError({ aborted: false, gotResult: false }, '', 7), 'codex exited with code 7');
 });
 
 test('turn.started and unknown/garbage events map to nothing', () => {

@@ -252,6 +252,14 @@ function killChild(child) {
   try { child.kill('SIGKILL'); } catch { /* already gone */ }
 }
 
+// Whether a child `close` should surface an error to the Runner. An aborted turn (a usage-pause
+// interrupt) or one that already produced a result stays silent — otherwise every pause emits a
+// bogus "codex exited". (P05-S02)
+function exitError(entry, stderr, code) {
+  if (entry.aborted || entry.gotResult) return null;
+  return stderr.trim() || `codex exited with code ${code}`;
+}
+
 function killLive(id) {
   const e = live.get(id);
   if (!e) return;
@@ -303,9 +311,8 @@ function spawnTurn(id, cwd, prompt, options, resumeId, send, onDone) {
   child.on('close', (code) => {
     if (buf) handleLine(id, entry, buf, send); // trailing partial line
     // No turn.completed/error seen (crash, auth failure) → surface one so the Runner isn't stranded.
-    if (!entry.aborted && !entry.gotResult) {
-      send('session:message', { id, msg: { type: 'error', message: stderr.trim() || `codex exited with code ${code}` } });
-    }
+    const msg = exitError(entry, stderr, code);
+    if (msg) send('session:message', { id, msg: { type: 'error', message: msg } });
     if (live.get(id) === entry) live.delete(id);
     onDone && onDone();
   });
@@ -333,7 +340,8 @@ function chat({ id, cwd, prompt, options = {} }, hooks = {}) {
 // Interrupt the live turn (usage-pause) — the thread id stays, so we can resume the same step.
 function interrupt(id) {
   const e = live.get(id);
-  if (e && e.child) killChild(e.child); // tree-kill; the thread id persists for resume
+  // aborted → the close handler emits no bogus "codex exited"; the thread id persists for resume.
+  if (e && e.child) { e.aborted = true; killChild(e.child); }
 }
 
 // Teardown between steps: kill the turn AND drop the thread id so the next step starts fresh.
@@ -344,5 +352,5 @@ function stop(id) {
 }
 
 module.exports = { start, send, chat, interrupt, stop, currentSessionId, mcpStatus,
-  mapCodexEvent, mapItem, buildArgs, permissionArgs, CODEX_CAPS, defaultSend,
+  mapCodexEvent, mapItem, buildArgs, permissionArgs, CODEX_CAPS, defaultSend, exitError,
   supportsAutoReview, codexCaps, AUTO_REVIEW_UNAVAILABLE_MSG, reviewNote };

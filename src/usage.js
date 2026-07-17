@@ -70,13 +70,21 @@ class UsageService extends EventEmitter {
     this.checked = null;
     this.error = null;
     this._timer = null;
+    this._inFlight = false; // a poll is awaiting fetch() right now
+    this.stopped = false;   // stop() ran — an in-flight poll must not emit or re-arm
   }
 
-  start() { if (!this._timer) this._tick(); }
-  stop() { clearTimeout(this._timer); this._timer = null; }
+  // Guarded against a leaked/double poller on engine-switch: don't start a second loop if one
+  // is already armed or in flight, and don't let a poll that resolves after stop() re-arm.
+  start() { this.stopped = false; if (this._timer == null && !this._inFlight) this._tick(); }
+  stop() { this.stopped = true; clearTimeout(this._timer); this._timer = null; }
 
   async _tick() {
+    this.stopped = false; // a fresh tick (start or self-reschedule) is live until stop() says otherwise
+    this._inFlight = true;
     const r = await this.fetch();
+    this._inFlight = false;
+    if (this.stopped) return; // stop() ran while this poll was in flight — don't emit or re-arm
     if (r.error) {
       this.error = r.error; // transient spawn/parse error — keep last-known session/week
     } else if (r.session == null && r.week == null) {
