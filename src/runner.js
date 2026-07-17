@@ -113,6 +113,11 @@ class Runner extends EventEmitter {
     this._stepStartedAtMs = 0;   // wall-clock the current step first started (survives retries)
     this._lastResult = null;     // last `result` msg of the current step → ledger tokens/turns/cost
     this.appendLedger = appendLedger; // per-step run ledger writer; overridable in tests
+    // Discard-step seams (P06-S06), overridable in tests: SDK file-checkpoint rewind + its anchor,
+    // and the `git checkout` fallback when no checkpoint is available.
+    this.rewindFiles = session.rewindFiles;
+    this.stepStartMsgId = () => session.stepStartMessageId(this.id);
+    this.gitCheckout = (cwd) => execFileSync('git', ['checkout', '--', '.'], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -400,6 +405,22 @@ class Runner extends EventEmitter {
     const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode,
       maxTurns: this.project.maxTurns, resume: this._provider.currentSessionId(this.id) || undefined };
     this._provider.chat({ id: this.id, cwd: this.project.path, prompt: text, options }, { send: this._wrapSend(stepId, this._gen) });
+  }
+
+  // Discard the current step's file edits (P06-S06). Prefer SDK file checkpointing — rewind the
+  // live session's tracked files to the step-start user message; fall back to `git checkout -- .`
+  // when no checkpoint is available (no live session, Codex, or an SDK too old to rewind).
+  // Returns { method, filesChanged? }. Untracked files the step created are not removed (matches
+  // `git checkout` semantics); the checkpoint rewind only reverts what it snapshotted.
+  async discardStepChanges() {
+    if ((this.project.engine || 'claude') !== 'codex') {
+      try {
+        const res = await this.rewindFiles(this.id, this.stepStartMsgId());
+        if (res && res.canRewind) return { method: 'checkpoint', filesChanged: res.filesChanged || [] };
+      } catch { /* checkpoint unavailable/failed → git fallback below */ }
+    }
+    this.gitCheckout(this.project.path);
+    return { method: 'git' };
   }
 }
 

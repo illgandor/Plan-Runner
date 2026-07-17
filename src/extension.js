@@ -160,6 +160,24 @@ async function onMessage(m) {
     case 'interrupt':
       if (p) engine.provider(p.engine).interrupt(p.id);
       break;
+    case 'discard': {
+      // P06-S06: roll this step's file edits back to step start. Confirm modally (webview
+      // confirm() is a no-op), then rewind via the runner (SDK checkpoint → git-checkout fallback).
+      const r = ensureRunner();
+      if (!r) { const msg = 'Open a project folder first.'; post({ kind: 'info', text: msg }); break; }
+      const pick = await vscode.window.showWarningMessage(
+        "Discard this step's file changes? This reverts edits made since the step started.",
+        { modal: true }, 'Discard');
+      if (pick !== 'Discard') break;
+      try {
+        const res = await r.discardStepChanges();
+        const n = res.filesChanged ? ` (${res.filesChanged.length} files)` : '';
+        post({ kind: 'info', text: `Discarded this step's changes${n} via ${res.method}.` });
+      } catch (e) {
+        post({ kind: 'info', text: `Could not discard changes: ${String((e && e.message) || e)}` });
+      }
+      break;
+    }
     case 'permission':
       session.resolvePermission({ requestId: m.requestId, decision: m.decision });
       break;

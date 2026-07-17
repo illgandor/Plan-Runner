@@ -31,6 +31,7 @@
       <div class="row">
         <button id="attach" title="Attach a file (its path is handed to Claude to read)">📎 Attach</button>
         <button id="mcp" title="MCP servers for the active engine">🔌 MCP</button>
+        <button id="discard" title="Roll this step's file edits back to how they were at step start" hidden>↺ Discard step changes</button>
         <button id="stop" title="Interrupt the current turn">■ Stop turn</button>
         <button id="send" class="send">Send</button>
       </div>
@@ -360,6 +361,7 @@
     // not a master-plan project, the click still fires and the host explains why.
     $('run').textContent = running ? '■ Stop' : '▶ Start';
     $('run').classList.toggle('primary', !running);
+    $('discard').hidden = !running; // only offer step-discard while a step is in flight (P06-S06)
   }
   function insertAtCursor(ta, text) {
     const s = ta.selectionStart, e = ta.selectionEnd;
@@ -370,6 +372,8 @@
   // ---- Composer wiring ----
   $('run').onclick = () => vscode.postMessage({ type: running ? 'stop' : 'start' });
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });
+  $('discard').onclick = () => vscode.postMessage({ type: 'discard' }); // host confirms modally
+
   $('attach').onclick = () => vscode.postMessage({ type: 'attach' });
   $('mcp').onclick = () => {
     if (!$('mcpmenu').hidden) return closeMcp();        // toggle closed
