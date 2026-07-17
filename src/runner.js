@@ -133,13 +133,26 @@ class Runner extends EventEmitter {
     this._runNext();
   }
 
-  // Graceful stop: aborts the live session and halts the loop. Also cancels a pending
-  // resume — running=false stops onUsageUpdate from ever firing _resume().
+  // Graceful stop (D-022): finish the current step, THEN halt at the boundary — restores the
+  // standalone/PLAN.md behavior a hard-abort port regressed. Set the flag and KEEP the live
+  // session; the stopRequested checks in _runNext/_advance halt before the next step. If nothing
+  // is mid-step (idle, gating on the usage gate, or paused with no live turn), there's no step to
+  // finish, so halt now — this also cancels a pending resume (running=false stops onUsageUpdate).
   stop() {
     if (!this.running && !session.sessions.has(this.id)) return;
     this.stopRequested = true;
+    if (!this._turnLive && !this.finalizing) return this.abort('idle', 'Stopped');
+    this.emit('status', { state: 'running', step: this.currentStep,
+      detail: `Will stop after ${this.currentStep} — finishing this step, then halting.` });
+  }
+
+  // Hard abort (D-022): immediate teardown — kill the live session and finish NOW, mid-step. This
+  // is the pre-PLAN-07 stop() behavior, kept as a separate "stop now" control.
+  abort(state = 'idle', detail = 'Aborted') {
+    if (!this.running && !session.sessions.has(this.id)) return;
+    this.stopRequested = true;
     this._provider.stop(this.id);
-    this._finish('idle', 'Stopped');
+    this._finish(state, detail);
   }
 
   _finish(state, detail) {

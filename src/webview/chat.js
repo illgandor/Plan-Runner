@@ -32,6 +32,7 @@
         <button id="attach" title="Attach a file (its path is handed to Claude to read)">📎 Attach</button>
         <button id="mcp" title="MCP servers for the active engine">🔌 MCP</button>
         <button id="discard" title="Roll this step's file edits back to how they were at step start" hidden>↺ Discard step changes</button>
+        <button id="abort" title="Stop immediately — tear the session down now, without finishing the current step" hidden>⏹ Stop now</button>
         <button id="stop" title="Interrupt the current turn">■ Stop turn</button>
         <button id="send" class="send">Send</button>
       </div>
@@ -411,6 +412,8 @@
     $('run').textContent = running ? '■ Stop' : '▶ Start';
     $('run').classList.toggle('primary', !running);
     $('discard').hidden = !running; // only offer step-discard while a step is in flight (P06-S06)
+    $('abort').hidden = !running;   // hard "Stop now" only while running; ■ Stop (the run toggle) is graceful (P07-S01)
+    $('run').title = running ? 'Graceful stop — finish the current step, then halt' : 'Start the autonomous loop';
   }
   function insertAtCursor(ta, text) {
     const s = ta.selectionStart, e = ta.selectionEnd;
@@ -420,6 +423,7 @@
 
   // ---- Composer wiring ----
   $('run').onclick = () => vscode.postMessage({ type: running ? 'stop' : 'start' });
+  $('abort').onclick = () => vscode.postMessage({ type: 'abort' }); // hard teardown now (P07-S01)
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });
   $('discard').onclick = () => vscode.postMessage({ type: 'discard' }); // host confirms modally
 

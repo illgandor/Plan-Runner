@@ -92,7 +92,7 @@ function setEnabled(v) {
   ctx.workspaceState.update('planRunner.enabled', v);
   updateStatusBar();
   post({ kind: 'enabled', value: v });
-  if (!v && runner) runner.stop();
+  if (!v && runner) runner.abort(); // disabling the workspace tears down now, not gracefully
 }
 
 function ensureRunner() {
@@ -148,8 +148,11 @@ async function onMessage(m) {
       ensureRunner()?.start();
       break;
     }
-    case 'stop':
+    case 'stop':   // graceful: finish the current step, then halt (D-022)
       runner?.stop();
+      break;
+    case 'abort':  // hard: tear the session down now, mid-step
+      runner?.abort();
       break;
     case 'send':
       if (!p) return;
@@ -347,6 +350,6 @@ function activate(context) {
   );
 }
 
-function deactivate() { runner?.stop(); usage?.stop(); }
+function deactivate() { runner?.abort(); usage?.stop(); } // shutdown = immediate teardown
 
 module.exports = { activate, deactivate };
