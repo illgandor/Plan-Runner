@@ -154,6 +154,12 @@ async function onMessage(m) {
     case 'abort':  // hard: tear the session down now, mid-step
       runner?.abort();
       break;
+    case 'pause':  // owner hold the live Claude turn (D-023); runner refuses on Codex
+      runner?.pauseManual();
+      break;
+    case 'resume': // continue the same step after a manual pause
+      runner?.resumeManual();
+      break;
     case 'send':
       if (!p) return;
       if (runner && runner.running) runner.answer(m.text);        // continues the live step

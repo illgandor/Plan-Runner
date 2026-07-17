@@ -11,10 +11,10 @@ const { Runner } = require('../src/runner');
 
 // A temp master-plan project whose NEXT pointer stays on one step (the turn never advances
 // it here — we only exercise pause/resume within the step).
-function tempProject(step) {
+function tempProject(step, engine) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-runner-'));
   fs.writeFileSync(path.join(dir, 'PROGRESS.md'), `## ▶ NEXT STEP\nNEXT: ${step}\n`);
-  return { id: dir, path: dir, name: 'tmp', model: '(default)', effort: '(default)', mode: 'auto' };
+  return { id: dir, path: dir, name: 'tmp', engine, model: '(default)', effort: '(default)', mode: 'auto' };
 }
 
 // Swap the session module's methods for spies; the Runner uses the same singleton object.
@@ -77,5 +77,44 @@ test('Stop cancels a pending resume', () => {
     gate.over = false; r.onUsageUpdate();      // usage drops — must NOT resume
     assert.strictEqual(calls.start.length, 1, 'stopped runner never resumes');
     assert.strictEqual(r.running, false, 'runner is halted');
+  } finally { restore(); }
+});
+
+// P07-S02 (D-023): owner-driven Pause/Resume, Claude only, and the usage gate must NOT
+// auto-resume a manual hold when usage happens to drop.
+test('manual Pause holds; a usage drop does NOT auto-resume; resumeManual re-enters the step', () => {
+  const { calls, restore } = fakeSession();
+  try {
+    const gate = { over: false, isOverThreshold() { return this.over; } };
+    const r = new Runner(tempProject('P07-S02'));
+    r.usageGate = gate;
+
+    r.start();
+    r.pauseManual();                            // owner pauses a live turn (usage is under)
+    assert.strictEqual(calls.interrupt, 1, 'manual pause interrupts the turn');
+    assert.strictEqual(r.paused, true);
+    assert.strictEqual(r.manualPause, true, 'flagged as a manual hold');
+
+    r.onUsageUpdate();                          // usage under (never went over) — must not resume
+    assert.strictEqual(calls.start.length, 1, 'a usage tick never auto-resumes a manual pause');
+    assert.strictEqual(r.paused, true, 'still held');
+
+    r.resumeManual();                           // owner resumes → same step, captured id
+    assert.strictEqual(calls.start.length, 2, 'resume re-entered the session');
+    assert.strictEqual(calls.start[1].options.resume, 'sess-live', 'resumed with the captured id');
+    assert.strictEqual(r.paused, false);
+    assert.strictEqual(r.manualPause, false, 'manual flag cleared on resume');
+  } finally { restore(); }
+});
+
+test('pauseManual is refused on Codex (no mid-turn interrupt)', () => {
+  const { calls, restore } = fakeSession();
+  try {
+    const r = new Runner(tempProject('P07-S02', 'codex'));
+    r.usageGate = { over: false, isOverThreshold() { return false; } };
+    r.running = true; r._turnLive = true;       // simulate a live turn without driving a real Codex session
+    r.pauseManual();
+    assert.strictEqual(r.paused, false, 'Codex is never paused mid-turn');
+    assert.strictEqual(calls.interrupt, 0, 'no interrupt issued for Codex');
   } finally { restore(); }
 });

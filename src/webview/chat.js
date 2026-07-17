@@ -32,6 +32,7 @@
         <button id="attach" title="Attach a file (its path is handed to Claude to read)">📎 Attach</button>
         <button id="mcp" title="MCP servers for the active engine">🔌 MCP</button>
         <button id="discard" title="Roll this step's file edits back to how they were at step start" hidden>↺ Discard step changes</button>
+        <button id="pause" title="Pause the current turn (Claude only) — Resume continues the same step" hidden>⏸ Pause</button>
         <button id="abort" title="Stop immediately — tear the session down now, without finishing the current step" hidden>⏹ Stop now</button>
         <button id="stop" title="Interrupt the current turn">■ Stop turn</button>
         <button id="send" class="send">Send</button>
@@ -41,7 +42,7 @@
   const $ = (id) => document.getElementById(id);
   const log = $('log');
   const logoUri = app.dataset.logo || '';   // webview URI of src/webview/logo.png (from html())
-  let enabled = false, running = false;
+  let enabled = false, running = false, engine = 'claude', paused = false;
   let sessionTokens = 0;          // Codex: running total of tokens processed this run (no usage % source)
   let cur = null;                 // current assistant message element being streamed into
   const toolEls = new Map();      // toolUseId -> tool <details> element
@@ -306,7 +307,7 @@
         fill($('engine'), d.engines, d.engine);
         fill($('model'), d.models, d.model); fill($('effort'), d.efforts, d.effort); fill($('mode'), d.modes, d.mode);
         if (d.version) $('ver').textContent = 'v' + d.version;
-        enabled = d.enabled; reflect(); break;
+        engine = d.engine; enabled = d.enabled; reflect(); break;
       case 'enabled': enabled = d.value; reflect(); break;
       case 'status':
         setStatus(d); running = d.state === 'running' || d.state === 'needs-you' || d.state === 'finalizing'; reflect();
@@ -314,10 +315,10 @@
         break;
       case 'step-started': stepChip('▶ ' + (d.step || 'step')); cur = null; break;
       case 'step-done': stepChip(`✔ ${d.from} → ${d.to}`); cur = null; break;
-      case 'done': system('■ ' + (d.detail || d.state)); running = false; reflect(); break;
+      case 'done': system('■ ' + (d.detail || d.state)); running = false; paused = false; reflect(); break;
       case 'usage': usage(d); break;
-      case 'paused': setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
-      case 'resumed': setStatus({ state: 'running', detail: 'Resumed — usage dropped' }); break;
+      case 'paused': paused = true; reflect(); setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
+      case 'resumed': paused = false; reflect(); setStatus({ state: 'running', detail: 'Resumed' }); break;
       case 'info': system(d.text); break;
       case 'splash': splash(d.text); break;
       case 'attached': insertAtCursor($('input'), d.paths.map((p) => '@' + p).join(' ') + ' '); break;
@@ -413,6 +414,8 @@
     $('run').classList.toggle('primary', !running);
     $('discard').hidden = !running; // only offer step-discard while a step is in flight (P06-S06)
     $('abort').hidden = !running;   // hard "Stop now" only while running; ■ Stop (the run toggle) is graceful (P07-S01)
+    $('pause').hidden = !running || engine === 'codex'; // Claude-only manual hold (P07-S02, D-023)
+    $('pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
     $('run').title = running ? 'Graceful stop — finish the current step, then halt' : 'Start the autonomous loop';
   }
   function insertAtCursor(ta, text) {
@@ -424,6 +427,7 @@
   // ---- Composer wiring ----
   $('run').onclick = () => vscode.postMessage({ type: running ? 'stop' : 'start' });
   $('abort').onclick = () => vscode.postMessage({ type: 'abort' }); // hard teardown now (P07-S01)
+  $('pause').onclick = () => vscode.postMessage({ type: paused ? 'resume' : 'pause' }); // manual hold (P07-S02)
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });
   $('discard').onclick = () => vscode.postMessage({ type: 'discard' }); // host confirms modally
 

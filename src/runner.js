@@ -96,6 +96,7 @@ class Runner extends EventEmitter {
     this._gen = 0;
     this.usageGate = null;   // { isOverThreshold() } — set by the extension (UsageService)
     this.paused = false;     // held on the usage gate (between-steps OR mid-turn)
+    this.manualPause = false; // owner-set hold (Claude only, D-023) — usage gate won't auto-resume it
     this.gating = false;     // true = between-steps hold (no live session yet)
     this._turnLive = false;  // true only while a step's turn is actively streaming
     this._resumeId = null;   // session id captured at pause, replayed on resume
@@ -163,6 +164,7 @@ class Runner extends EventEmitter {
     this.running = false;
     this.needsYou = false;
     this.paused = false;
+    this.manualPause = false;
     this.gating = false;
     this._turnLive = false;
     this._planSession = false;
@@ -380,8 +382,25 @@ class Runner extends EventEmitter {
     if (!this.running || this.stopRequested) return;
     const over = this._over();
     if (this.gating) { if (!over) { this.gating = false; this.paused = false; this._runNext(); } return; }
-    if (this.paused) { if (!over) this._resume(); return; }
+    // A manual hold never auto-resumes on a usage drop — only resumeManual() clears it (D-023).
+    if (this.paused) { if (!over && !this.manualPause) this._resume(); return; }
     if (over && this._turnLive) this._pause();
+  }
+
+  // Owner-driven Pause/Resume (D-023) — Claude only (Codex has no mid-turn interrupt). Reuses the
+  // usage-gate pause machinery but flags it so a usage drop won't auto-resume a hold the owner set.
+  // No live turn (idle/gating/already paused) → nothing to pause. The webview hides the button on
+  // Codex; this refusal is the host-side backstop.
+  pauseManual() {
+    if ((this.project.engine || 'claude') === 'codex') return;
+    if (!this.running || this.paused || !this._turnLive) return;
+    this.manualPause = true;
+    this._pause();
+  }
+  resumeManual() {
+    if (!this.manualPause) return;
+    this.manualPause = false;
+    this._resume();
   }
 
   // Over threshold mid-turn: interrupt (stops the TURN, session id stays valid — D-005),
@@ -391,7 +410,9 @@ class Runner extends EventEmitter {
     this.paused = true;
     this._turnLive = false;
     this._provider.interrupt(this.id);
-    this.emit('paused', { reason: `Usage at/above threshold — paused ${this.currentStep}, resuming when it drops` });
+    this.emit('paused', { reason: this.manualPause
+      ? `Paused ${this.currentStep} — click Resume to continue`
+      : `Usage at/above threshold — paused ${this.currentStep}, resuming when it drops` });
   }
 
   // Usage dropped back under while paused: re-enter the SAME step's session.
