@@ -33,13 +33,15 @@
         <button id="attach" title="Attach a file (its path is handed to Claude to read)">📎 Attach</button>
         <button id="mcp" title="MCP servers for the active engine">🔌 MCP</button>
         <button id="settings" title="Plan Runner settings">⚙ Settings</button>
+        <button id="help" title="Help — the loop and every control">? Help</button>
         <button id="discard" title="Roll this step's file edits back to how they were at step start" hidden>↺ Discard step changes</button>
         <button id="pause" title="Pause the current turn (Claude only) — Resume continues the same step" hidden>⏸ Pause</button>
         <button id="abort" title="Stop immediately — tear the session down now, without finishing the current step" hidden>⏹ Stop now</button>
         <button id="stop" title="Interrupt the current turn">■ Stop turn</button>
         <button id="send" class="send">Send</button>
       </div>
-    </div>`;
+    </div>
+    <div id="helpview" class="helpview" hidden></div>`;
 
   const $ = (id) => document.getElementById(id);
   const log = $('log');
@@ -360,6 +362,72 @@
     menu.hidden = false;
   }
 
+  // ---- In-panel help view (P08-S02): self-contained guide, no host round-trip (D-025) ----
+  // Authored as markdown + rendered by the vendored renderer; the logo sits on top.
+  const HELP_MD = [
+    '# Plan Runner',
+    '',
+    'Plan Runner autonomously drives a **master-plan** project: it runs your plan one step',
+    'at a time, each in a fresh Claude (or Codex) context window. When a step\'s work is',
+    'committed and `PROGRESS.md`\'s `NEXT:` pointer advances, it tears the session down and',
+    'starts the next step — until the plan is complete.',
+    '',
+    '## The loop',
+    '',
+    '- **Start** begins the autonomous run at `PROGRESS.md`\'s next step.',
+    '- Each step runs in its own fresh session; a commit + pointer-advance ends it.',
+    '- When a step needs you, the status turns to **needs-you** — answer in the composer and the loop continues.',
+    '',
+    '## Controls',
+    '',
+    '- **Start / Stop** — Stop is *graceful*: it finishes the current step, then halts.',
+    '- **Stop now** — hard abort: tears the session down immediately, mid-step.',
+    '- **Stop turn** — interrupts just the current turn (the step stays; you can keep going).',
+    '- **Pause / Resume** — hold and resume the same step. *Claude only* (hidden on Codex).',
+    '- **Discard step changes** — roll this step\'s file edits back to how they were at step start.',
+    '- **Engine / Model / Effort / Mode** — pick the engine (Claude or Codex), its model, reasoning effort, and permission mode.',
+    '- **Attach** — hand a file\'s path to Claude to read.',
+    '- **MCP** — view, add, and reconnect MCP servers for the active engine.',
+    '- **Settings (gear)** — edit every Plan Runner setting in-panel (see below).',
+    '- **Send** — send a message, or answer a step\'s question.',
+    '',
+    '## Usage meter & caps',
+    '',
+    '- The meter shows **Session** and **Week** account-usage %. **Pause @ N%** holds the loop when usage crosses your threshold, then resumes once it drops back.',
+    '- *Claude only*: Codex reports no account usage %, so it shows **N/A** plus a token counter instead.',
+    '- **Settings** covers the usage-poll cadence, the finalize-quiet window, and optional run caps (max turns per step, max steps per run, stop-at-time) — all off by default.',
+    '',
+    '## Where it docks',
+    '',
+    'Plan Runner lives in a panel. **Drag its tab to the secondary side bar** (the right edge)',
+    'to keep it open beside your editor — it stays put across sessions.',
+    '',
+    '## Self-update',
+    '',
+    'Side-loaded builds poll GitHub Releases and offer to install a newer `.vsix`, then reload.',
+  ].join('\n');
+  function closeHelp() { $('helpview').hidden = true; }
+  function toggleHelp() {
+    const v = $('helpview');
+    if (!v.hidden) return closeHelp();          // toggle closed
+    closeMcp(); closeSettings();
+    if (!v.dataset.built) {                      // build once, lazily
+      const bar = document.createElement('div'); bar.className = 'help-bar';
+      const close = document.createElement('button'); close.className = 'help-close';
+      close.textContent = '✕ Close'; close.onclick = closeHelp;
+      bar.appendChild(close); v.appendChild(bar);
+      if (logoUri) {
+        const img = document.createElement('img');
+        img.className = 'help-logo'; img.src = logoUri; img.alt = 'Plan Runner';
+        img.onerror = () => img.remove();         // asset missing → hide gracefully
+        v.appendChild(img);
+      }
+      if (window.renderMarkdown) v.appendChild(window.renderMarkdown(HELP_MD));
+      v.dataset.built = '1';
+    }
+    v.hidden = false; v.scrollTop = 0;
+  }
+
   // ---- In-composer MCP popover (P02-S07): no modal; the active engine's servers + actions ----
   function mcpAction(action, server) { vscode.postMessage({ type: 'mcpAction', action, server }); closeMcp(); }
   function closeMcp() { $('mcpmenu').hidden = true; }
@@ -468,15 +536,16 @@
   $('attach').onclick = () => vscode.postMessage({ type: 'attach' });
   $('mcp').onclick = () => {
     if (!$('mcpmenu').hidden) return closeMcp();        // toggle closed
-    closeSettings();
+    closeSettings(); closeHelp();
     vscode.postMessage({ type: 'mcpList' });            // host replies with {kind:'mcp'} → renderMcp opens it
   };
   $('settings').onclick = () => {
     if (!$('settingsmenu').hidden) return closeSettings();   // toggle closed
-    closeMcp();
+    closeMcp(); closeHelp();
     vscode.postMessage({ type: 'getSettings' });        // host replies with {kind:'settings'} → renderSettings opens it
   };
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMcp(); closeSettings(); } });
+  $('help').onclick = toggleHelp;
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMcp(); closeSettings(); closeHelp(); } });
   $('engine').onchange = (e) => vscode.postMessage({ type: 'setEngine', value: e.target.value });
   $('model').onchange = (e) => vscode.postMessage({ type: 'setModel', value: e.target.value });
   $('effort').onchange = (e) => vscode.postMessage({ type: 'setEffort', value: e.target.value });
