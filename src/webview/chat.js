@@ -36,8 +36,8 @@
         <button id="help" title="Help — the loop and every control">? Help</button>
         <button id="discard" title="Roll this step's file edits back to how they were at step start" hidden>↺ Discard step changes</button>
         <button id="pause" title="Pause the current turn (Claude only) — Resume continues the same step" hidden>⏸ Pause</button>
-        <button id="abort" title="Stop immediately — tear the session down now, without finishing the current step" hidden>⏹ Stop now</button>
-        <button id="stop" title="Interrupt the current turn">■ Stop turn</button>
+        <button id="abort" title="Abort the run now — tear the session down immediately, without finishing the current step" hidden>⏹ Abort run</button>
+        <button id="stop" title="Abort the current turn (the step stays)">■ Abort turn</button>
         <button id="send" class="send">Send</button>
       </div>
     </div>
@@ -381,8 +381,8 @@
     '## Controls',
     '',
     '- **Start / Stop** — Stop is *graceful*: it finishes the current step, then halts.',
-    '- **Stop now** — hard abort: tears the session down immediately, mid-step.',
-    '- **Stop turn** — interrupts just the current turn (the step stays; you can keep going).',
+    '- **Abort run** — hard abort: tears the session down immediately, mid-step.',
+    '- **Abort turn** — interrupts just the current turn (the step stays; you can keep going).',
     '- **Pause / Resume** — hold and resume the same step. *Claude only* (hidden on Codex).',
     '- **Discard step changes** — roll this step\'s file edits back to how they were at step start.',
     '- **Engine / Model / Effort / Mode** — pick the engine (Claude or Codex), its model, reasoning effort, and permission mode.',
@@ -515,7 +515,7 @@
     $('run').textContent = running ? '■ Stop' : '▶ Start';
     $('run').classList.toggle('primary', !running);
     $('discard').hidden = !running; // only offer step-discard while a step is in flight (P06-S06)
-    $('abort').hidden = !running;   // hard "Stop now" only while running; ■ Stop (the run toggle) is graceful (P07-S01)
+    $('abort').hidden = !running;   // hard "Abort run" only while running; ■ Stop (the run toggle) is graceful (P07-S01)
     $('pause').hidden = !running || engine === 'codex'; // Claude-only manual hold (P07-S02, D-023)
     $('pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
     $('run').title = running ? 'Graceful stop — finish the current step, then halt' : 'Start the autonomous loop';
