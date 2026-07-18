@@ -7,5 +7,14 @@ out/
 .claude/
 
 # Vendored standalone Plan Runner — reference only, never shipped/committed
-# (root-anchored so it does NOT match planning/reference/)
 /reference/
+
+# Internal planning docs — kept local, out of the public repo (master-plan scaffolding).
+# Purged from history 2026-07-17; these live on disk for the runner but never ship publicly.
+/PROGRESS.md
+/SESSION_PROMPT.md
+/OWNER_TODO.md
+/CLAUDE.md
+/PLAN.md
+/IMPROVEMENT_PROPOSAL.md
+/planning/
