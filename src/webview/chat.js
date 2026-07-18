@@ -27,10 +27,12 @@
     <div class="composer">
       <button id="jump" class="jump" hidden>↓ New</button>
       <div id="mcpmenu" class="mcpmenu" hidden></div>
+      <div id="settingsmenu" class="mcpmenu" hidden></div>
       <textarea id="input" placeholder="Message Claude, or answer a step's question…"></textarea>
       <div class="row">
         <button id="attach" title="Attach a file (its path is handed to Claude to read)">📎 Attach</button>
         <button id="mcp" title="MCP servers for the active engine">🔌 MCP</button>
+        <button id="settings" title="Plan Runner settings">⚙ Settings</button>
         <button id="discard" title="Roll this step's file edits back to how they were at step start" hidden>↺ Discard step changes</button>
         <button id="pause" title="Pause the current turn (Claude only) — Resume continues the same step" hidden>⏸ Pause</button>
         <button id="abort" title="Stop immediately — tear the session down now, without finishing the current step" hidden>⏹ Stop now</button>
@@ -323,8 +325,40 @@
       case 'splash': splash(d.text); break;
       case 'attached': insertAtCursor($('input'), d.paths.map((p) => '@' + p).join(' ') + ' '); break;
       case 'mcp': renderMcp(d.engine, d.servers || []); break;
+      case 'settings': renderSettings(d.values || {}); break;
     }
   });
+
+  // ---- In-composer settings popover (P08-S01): edit planRunner.* without leaving the panel ----
+  // Reuses the .mcpmenu float. Host owns the values (getSettings/setSetting) + global-config write.
+  const SETTINGS = [
+    { key: 'pauseThresholdPct', label: 'Pause @ usage %', min: 10, max: 100 },
+    { key: 'usagePollSeconds', label: 'Usage poll (seconds)', min: 10, max: 3600 },
+    { key: 'finalizeQuietSeconds', label: 'Finalize quiet (seconds)', min: 0, max: 600 },
+    { key: 'maxTurns', label: 'Max turns / step (0 = off)', min: 0, max: 1000 },
+    { key: 'maxStepsPerRun', label: 'Max steps / run (0 = off)', min: 0, max: 1000 },
+    { key: 'stopAtTime', label: 'Stop at time (blank = off)', type: 'time' },
+  ];
+  function closeSettings() { $('settingsmenu').hidden = true; }
+  function renderSettings(values) {
+    const menu = $('settingsmenu');
+    menu.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'mcp-head'; head.textContent = 'Settings — planRunner';
+    menu.appendChild(head);
+    SETTINGS.forEach((s) => {
+      const row = document.createElement('label'); row.className = 'set-row';
+      const name = document.createElement('span'); name.className = 'set-label'; name.textContent = s.label;
+      const inp = document.createElement('input');
+      inp.type = s.type || 'number';
+      if (!s.type) { inp.min = s.min; inp.max = s.max; inp.step = 1; }
+      const v = values[s.key];
+      inp.value = v == null ? '' : v;
+      inp.onchange = () => vscode.postMessage({ type: 'setSetting', key: s.key, value: inp.value });
+      row.append(name, inp); menu.appendChild(row);
+    });
+    menu.hidden = false;
+  }
 
   // ---- In-composer MCP popover (P02-S07): no modal; the active engine's servers + actions ----
   function mcpAction(action, server) { vscode.postMessage({ type: 'mcpAction', action, server }); closeMcp(); }
@@ -434,9 +468,15 @@
   $('attach').onclick = () => vscode.postMessage({ type: 'attach' });
   $('mcp').onclick = () => {
     if (!$('mcpmenu').hidden) return closeMcp();        // toggle closed
+    closeSettings();
     vscode.postMessage({ type: 'mcpList' });            // host replies with {kind:'mcp'} → renderMcp opens it
   };
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMcp(); });
+  $('settings').onclick = () => {
+    if (!$('settingsmenu').hidden) return closeSettings();   // toggle closed
+    closeMcp();
+    vscode.postMessage({ type: 'getSettings' });        // host replies with {kind:'settings'} → renderSettings opens it
+  };
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMcp(); closeSettings(); } });
   $('engine').onchange = (e) => vscode.postMessage({ type: 'setEngine', value: e.target.value });
   $('model').onchange = (e) => vscode.postMessage({ type: 'setModel', value: e.target.value });
   $('effort').onchange = (e) => vscode.postMessage({ type: 'setEffort', value: e.target.value });

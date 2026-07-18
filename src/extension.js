@@ -77,6 +77,22 @@ function usageConfig() {
   const c = vscode.workspace.getConfiguration('planRunner');
   return { threshold: c.get('pauseThresholdPct', 90), pollSec: c.get('usagePollSeconds', 60), finalizeSec: c.get('finalizeQuietSeconds', 120) };
 }
+// §In-extension UI — the six planRunner.* keys the ⚙ popover reads/writes, with the
+// package.json contribution bounds (host clamps writes to these). stopAtTime = "HH:MM"|"".
+const SETTING_SPEC = {
+  pauseThresholdPct: { min: 10, max: 100, def: 90 },
+  usagePollSeconds: { min: 10, max: 3600, def: 60 },
+  finalizeQuietSeconds: { min: 0, max: 600, def: 120 },
+  maxTurns: { min: 0, max: 1000, def: 0 },
+  maxStepsPerRun: { min: 0, max: 1000, def: 0 },
+  stopAtTime: { time: true, def: '' },
+};
+function postSettings() {
+  const c = vscode.workspace.getConfiguration('planRunner');
+  const values = {};
+  for (const [key, spec] of Object.entries(SETTING_SPEC)) values[key] = c.get(key, spec.def);
+  post({ kind: 'settings', values });
+}
 // Frozen §Webview⇄host shape. `paused` reflects the Runner holding on the usage gate (S08).
 function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error }); }
 
@@ -236,6 +252,27 @@ async function onMessage(m) {
       const v = Math.max(10, Math.min(100, Math.round(Number(m.value))));
       if (Number.isFinite(v))
         vscode.workspace.getConfiguration('planRunner').update('pauseThresholdPct', v, vscode.ConfigurationTarget.Global);
+      break;
+    }
+    case 'getSettings':   // ⚙ popover opened — send current planRunner.* values (P08-S01)
+      postSettings();
+      break;
+    case 'setSetting': {
+      // Write one planRunner.* key to global config (same path as setThreshold). Validate/clamp
+      // to the package.json contribution bounds, then echo the persisted values back to the popover.
+      const spec = SETTING_SPEC[m.key];
+      if (!spec) break;                       // ignore unknown keys
+      let v;
+      if (spec.time) {
+        v = String(m.value || '');
+        if (v && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) break;   // invalid HH:MM — ignore
+      } else {
+        v = Math.round(Number(m.value));
+        if (!Number.isFinite(v)) break;
+        v = Math.max(spec.min, Math.min(spec.max, v));
+      }
+      await vscode.workspace.getConfiguration('planRunner').update(m.key, v, vscode.ConfigurationTarget.Global);
+      postSettings();                         // reflect the clamped/persisted value in the open popover
       break;
     }
     case 'attach': {
