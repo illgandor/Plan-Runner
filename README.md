@@ -1,5 +1,7 @@
 # Plan Runner (VS Code extension)
 
+<img src="media/logo.png" alt="Plan Runner" width="128" />
+
 An agent chat panel that **autonomously drives a master-plan project** — one fresh
 context window per step — right inside VS Code. It's the useful core of the standalone
 Plan Runner app, minus Electron.
@@ -10,6 +12,13 @@ work is done it tears the session down and starts the next step in a **fresh con
 window** — the thing you'd otherwise do by hand with the ＋ new-session button. If a step
 needs you (a question, or a command outside the auto-allow list), it asks **in the panel**;
 your answer continues the **same** session.
+
+## Where it docks
+
+The panel opens in the activity bar. **Drag the Plan Runner icon to the right-hand secondary
+side bar once** and VS Code remembers the spot — so the plan runs alongside your editor
+instead of covering it. (VS Code reserves the default secondary-sidebar slot for built-in
+chat extensions, so this one-time drag is how a shipped extension gets there.)
 
 ## Spec-Driven Development
 
@@ -38,8 +47,9 @@ Pick the engine in the panel; the rest of the UI stays the same.
   (including xhigh), agents, and MCP servers preserved.
 
 The Claude code path is unchanged when Codex isn't selected; the webview and loop are
-engine-agnostic, so streaming, run controls, and the usage gate work the same either way
-(with the few Claude-only exceptions noted below).
+engine-agnostic, so streaming and the run controls work the same either way. The account
+**usage meter and the Pause @ N% gate are Claude-only** — Codex exposes no `/usage` %, so it
+shows N/A with a plain token counter instead.
 
 ## Panel features
 
@@ -97,24 +107,22 @@ Requires the `claude` CLI logged in (same as the standalone app) and the `next-s
 Build a `.vsix` and side-load it, so it loads in every VS Code window automatically:
 
 ```
-npx vsce package                                        # -> plan-runner-<version>.vsix (~84 MB)
+npx vsce package                                        # -> plan-runner-<version>.vsix (~7 MB)
 code --install-extension plan-runner-<version>.vsix --force
 ```
 
-Then **Reload Window**. After that: open any project, click the Plan Runner icon, and
-**drag it to the right-hand secondary side bar once** — VS Code remembers the spot. (VS
-Code won't let a shipped extension default there; that's reserved for built-in chat
-extensions. See PLAN.md.)
+Then **Reload Window**, open any project, and click the Plan Runner icon (see
+[Where it docks](#where-it-docks) to move it to the secondary side bar).
 
 **Update after code edits:** re-run the two commands (`--force` overwrites), Reload Window.
 For released builds the panel **self-updates** — it polls GitHub Releases and offers to
 side-load the newer `.vsix`. It's a **Windows-only** build right now (the `claude` binary is
-bundled as `win32-x64`); cross-platform is a non-goal.
+resolved from your PATH install, not bundled); cross-platform is a non-goal.
 
 ## License
 
-[Apache-2.0](LICENSE) — repo source only. The bundled third-party `claude` binary is not
-relicensed. See [NOTICE](NOTICE).
+[Apache-2.0](LICENSE) — repo source only. The `claude` binary is external (resolved from your
+PATH install, not bundled or redistributed). See [NOTICE](NOTICE).
 
 See [PLAN.md](PLAN.md) for architecture, the reuse map, decisions log, and the remaining
 work.
