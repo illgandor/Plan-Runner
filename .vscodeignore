@@ -1,5 +1,7 @@
-# Keep the .vsix small — ship only what runs. node_modules is bundled by vsce because
-# the SDK (and its per-platform claude binary) must ship; don't ignore it.
+# Keep the .vsix small — ship only what runs. node_modules is bundled by vsce, but the
+# 249MB per-platform claude binary is EXCLUDED (P06-S10 / D-019): claude-path.js resolves the
+# user's installed `claude` from PATH, so the bundle need not ship (~88MB -> ~1MB .vsix).
+node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe
 .gitignore
 .vscode/**
 PLAN.md
