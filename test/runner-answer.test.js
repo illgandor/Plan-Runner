@@ -40,6 +40,54 @@ function stubProvider(mod, dir, advanceTo) {
   return { calls, restore: () => { for (const k of keys) mod[k] = orig[k]; } };
 }
 
+// P09-S01 (D-027): a composer send while PAUSED is an explicit resume. Before the fix answer()
+// left this.paused set, so _onTurnEnd's `paused` guard dropped the follow-up turn's result and the
+// loop desynced (pointer advanced, runner never noticed). Pause mid-turn → answer → step advances.
+test('answer while paused resumes tracking and advances the loop (D-027)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setImmediate'] });
+  const p = tempProject('S1', 'claude');
+  const mod = require('../src/session');
+  const keys = ['start', 'chat', 'stop', 'interrupt', 'currentSessionId', 'defaultSend'];
+  const orig = {};
+  for (const k of keys) orig[k] = mod[k];
+  const calls = { chat: 0 };
+  mod.defaultSend = () => {};
+  mod.interrupt = () => {};
+  mod.stop = () => {};
+  mod.currentSessionId = () => 'sess-1';
+  mod.start = () => ({}); // never fires a turn-end → the turn stays live so we can pause it
+  mod.chat = (_args, hooks) => {
+    calls.chat++;
+    fs.writeFileSync(path.join(p.path, 'PROGRESS.md'), '## ▶ NEXT STEP\nNEXT: none\n'); // answer advances S1 → done
+    if (hooks && hooks.send) hooks.send('session:message', { msg: { type: 'result' } });
+  };
+  try {
+    const gate = { over: false, isOverThreshold() { return this.over; } };
+    const r = new Runner(p);
+    r.finalizeMs = 0;
+    r.usageGate = gate;
+    r.gitCheck = () => ({ clean: true, pushed: true });
+    let done = null; const advanced = []; const resumed = [];
+    r.on('done', (d) => { done = d; });
+    r.on('step-done', (d) => advanced.push(d));
+    r.on('resumed', () => resumed.push(1));
+
+    r.start();
+    t.mock.timers.tick(0);
+    gate.over = true; r.onUsageUpdate();        // usage crosses threshold mid-turn → pause
+    assert.equal(r.paused, true, 'paused on the usage gate');
+
+    r.answer('keep going');                      // send while paused = explicit resume (D-027)
+    t.mock.timers.tick(0);
+
+    assert.equal(r.paused, false, 'answer cleared the pause');
+    assert.equal(resumed.length, 1, 'answer emitted resumed');
+    assert.equal(calls.chat, 1, 'answer routed through provider.chat');
+    assert.deepEqual(advanced.map((a) => a.from), ['S1'], 'the paused step advanced after the answer');
+    assert.equal(done && done.state, 'done', 'the loop finished after the answer, did not desync');
+  } finally { for (const k of keys) mod[k] = orig[k]; }
+});
+
 for (const engine of ['claude', 'codex']) {
   test(`${engine}: needs-you → answer advances the loop (not stall)`, (t) => {
     t.mock.timers.enable({ apis: ['setTimeout', 'setImmediate'] });

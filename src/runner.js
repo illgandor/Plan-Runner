@@ -433,6 +433,16 @@ class Runner extends EventEmitter {
     this.needsYou = false;
     clearTimeout(this._finalizeTimer); // typing during the settle window holds it & continues the session
     this.finalizing = false;
+    // A composer send while paused is an explicit resume (D-027): clear the holds so the follow-up
+    // turn's result is processed — otherwise _onTurnEnd's `this.paused` guard drops it and the loop
+    // desyncs (pointer advances, runner never notices). Only the usage gate auto-resumes an unmanual
+    // pause; a human reply resumes either kind.
+    if (this.paused || this.manualPause || this.gating) {
+      this.paused = false;
+      this.manualPause = false;
+      this.gating = false;
+      this.emit('resumed', {});
+    }
     this._turnLive = true;
     const stepId = this.currentStep;
     this.emit('status', { state: 'running', step: stepId, detail: `Continuing ${stepId}…` });
