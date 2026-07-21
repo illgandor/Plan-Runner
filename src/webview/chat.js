@@ -115,6 +115,22 @@
     el.appendChild(document.createTextNode(t));
     scroll();
   }
+  // Add a copy button to every fenced code block under `root` (P09-S13). Idempotent.
+  function addCopyButtons(root) {
+    root.querySelectorAll('pre').forEach((pre) => {
+      if (pre.dataset.copy) return;
+      pre.dataset.copy = '1';
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'code-copy'; btn.textContent = 'Copy';
+      btn.addEventListener('click', () => {
+        const code = pre.querySelector('code');
+        navigator.clipboard.writeText(code ? code.textContent : pre.textContent).then(() => {
+          btn.textContent = '✓'; setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+        }, () => {});
+      });
+      pre.appendChild(btn);
+    });
+  }
   // Re-render a finished assistant bubble's streamed plain text as sanitized markdown (D-015).
   // Replaces each run of adjacent text nodes in place; leaves think/tool/note children untouched.
   function finalizeMd(el) {
@@ -132,6 +148,7 @@
       if (n.nodeType === Node.TEXT_NODE) group.push(n); else flush();
     });
     flush();
+    addCopyButtons(el);
   }
   function appendThinking(t) {
     const el = ensureAssistant();
@@ -518,7 +535,7 @@
         img.onerror = () => img.remove();         // asset missing → hide gracefully
         v.appendChild(img);
       }
-      if (window.renderMarkdown) v.appendChild(window.renderMarkdown(HELP_MD));
+      if (window.renderMarkdown) { v.appendChild(window.renderMarkdown(HELP_MD)); addCopyButtons(v); }
       v.dataset.built = '1';
     }
     v.hidden = false; v.scrollTop = 0;

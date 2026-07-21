@@ -59,3 +59,17 @@ test('links keep safe schemes and drop javascript: (whitelist)', () => {
 test('inside inline code, ** stays literal (code wins precedence)', () => {
   assert.strictEqual(md('`**x**`'), '<p><code>**x**</code></p>');
 });
+
+test('GFM table renders thead/tbody with cells; inline markup works in cells', () => {
+  assert.strictEqual(md('| A | B |\n| --- | --- |\n| 1 | `x` |'),
+    '<table><thead><tr><th>A</th><th>B</th></tr></thead>' +
+    '<tbody><tr><td>1</td><td><code>x</code></td></tr></tbody></table>');
+});
+
+test('a lone pipe line with no --- separator stays a paragraph', () => {
+  assert.strictEqual(md('a | b'), '<p>a | b</p>');
+});
+
+test('a header row over a plain --- rule (no pipe) is not a table', () => {
+  assert.ok(!md('| h |\n---').includes('<table>'));
+});
