@@ -71,6 +71,14 @@
           "pattern": "^$|^([01]?\\d|2[0-3]):[0-5]\\d$",
           "scope": "application",
           "description": "Optional wall-clock stop time in 24h \"HH:MM\". When set, the run stops cleanly between steps at/after this time (next occurrence if it's already past when the run starts). Empty = off (default)."
+        },
+        "planRunner.stallNotifySeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 3600,
+          "scope": "application",
+          "description": "Optional mid-turn stall watchdog. When >0, a live turn that produces no output for this many seconds fires one OS notification + panel line so a hung stream is visible before morning. Notify-only — the turn is never killed or altered. 0 = off (default)."
         }
       }
     },

@@ -355,6 +355,7 @@
     { key: 'maxTurns', label: 'Max turns / step (0 = off)', min: 0, max: 1000 },
     { key: 'maxStepsPerRun', label: 'Max steps / run (0 = off)', min: 0, max: 1000 },
     { key: 'stopAtTime', label: 'Stop at time (blank = off)', type: 'time' },
+    { key: 'stallNotifySeconds', label: 'Stall notify (seconds, 0 = off)', min: 0, max: 3600 },
   ];
   function closeSettings() { $('settingsmenu').hidden = true; }
   function renderSettings(values) {

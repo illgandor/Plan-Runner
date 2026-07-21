@@ -86,6 +86,7 @@ const SETTING_SPEC = {
   maxTurns: { min: 0, max: 1000, def: 0 },
   maxStepsPerRun: { min: 0, max: 1000, def: 0 },
   stopAtTime: { time: true, def: '' },
+  stallNotifySeconds: { min: 0, max: 3600, def: 0 },
 };
 function postSettings() {
   const c = vscode.workspace.getConfiguration('planRunner');
@@ -112,11 +113,13 @@ function setEnabled(v) {
 }
 
 function ensureRunner() {
-  if (runner) { runner.project = project(); runner.finalizeMs = usageConfig().finalizeSec * 1000; return runner; } // pick up edits
+  const stallMs = vscode.workspace.getConfiguration('planRunner').get('stallNotifySeconds', 0) * 1000;
+  if (runner) { runner.project = project(); runner.finalizeMs = usageConfig().finalizeSec * 1000; runner.stallMs = stallMs; return runner; } // pick up edits
   const p = project();
   if (!p) return null;
   runner = new Runner(p);
   runner.finalizeMs = usageConfig().finalizeSec * 1000; // settle window between steps (S: finalizeQuietSeconds)
+  runner.stallMs = stallMs; // mid-turn stall watchdog (S: stallNotifySeconds; 0 = off) — P09-S05
   runner.usageGate = usage; // S08: crossing the threshold pauses/resumes the loop
   runner.on('status', (s) => {
     post({ kind: 'status', ...s });
@@ -132,6 +135,14 @@ function ensureRunner() {
     runningStep = null; updateStatusBar();
     if (d.state === 'done') notify('done', 'info', `Plan Runner: ${d.detail || 'run complete'}`);
     else if (d.state === 'error') notify('error', 'warn', `Plan Runner: ${d.detail || 'run errored'}`);
+  });
+  // Mid-turn stall watchdog (P09-S05, D-030): one OS warning + panel line per silent window; the
+  // turn is untouched. Dedupe via lastNotify so a re-armed stall on the same step won't spam.
+  runner.on('stall', (s) => {
+    const key = 'stall:' + s.step;
+    if (key === lastNotify) return;
+    notify(key, 'warn', `Plan Runner: ${s.step} — no output for ${s.seconds}s (still running).`);
+    post({ kind: 'info', text: `⚠ No output from ${s.step} for ${s.seconds}s — the turn may be stalled.` });
   });
   runner.on('paused', (d) => { post({ kind: 'paused', reason: d.reason }); postUsage(usage.snapshot()); notify('paused', 'warn', `Plan Runner paused — ${d.reason}`); });
   runner.on('resumed', () => { post({ kind: 'resumed' }); postUsage(usage.snapshot()); lastNotify = null; });
@@ -396,6 +407,8 @@ function activate(context) {
         usage.setConfig(usageConfig()); // re-applies + emits 'update' → postUsage repaints
       if (e.affectsConfiguration('planRunner.finalizeQuietSeconds') && runner)
         runner.finalizeMs = usageConfig().finalizeSec * 1000; // live-apply the settle window
+      if (e.affectsConfiguration('planRunner.stallNotifySeconds') && runner)
+        runner.stallMs = vscode.workspace.getConfiguration('planRunner').get('stallNotifySeconds', 0) * 1000;
     }),
   );
 }

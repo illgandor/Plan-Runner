@@ -103,6 +103,8 @@ class Runner extends EventEmitter {
     this.finalizeMs = FINALIZE_MS; // settle window before advancing to the next step (0 = off)
     this.finalizing = false; // true during the post-advance quiet window (session kept alive)
     this._finalizeTimer = null;
+    this.stallMs = 0;        // live-turn silence watchdog (planRunner.stallNotifySeconds×1000); 0 = off
+    this._stallTimer = null; // notify-only (D-030): never kills/alters the turn
     this._planSession = false; // true while the master-plan (PLAN COMPLETE) session is live (P02-S08)
     this._advancedPlan = false; // guards master-plan to once per PLAN COMPLETE (a 2nd unchanged → finish)
     this.gitCheck = gitState;  // handoff guard; overridable in tests
@@ -160,6 +162,7 @@ class Runner extends EventEmitter {
     this._gen++; // invalidate any in-flight step callbacks
     clearTimeout(this._finalizeTimer);
     clearTimeout(this._retryTimer);
+    clearTimeout(this._stallTimer);
     this.finalizing = false;
     this.running = false;
     this.needsYou = false;
@@ -261,9 +264,23 @@ class Runner extends EventEmitter {
       if (gen !== this._gen || channel !== 'session:message') return;
       const t = payload.msg.type;
       if (t === 'result') this._lastResult = payload.msg; // keep for the run ledger at step-done
-      if (t === 'result' || t === 'error') this._onTurnEnd(stepId, gen, t === 'error');
-      else if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
+      if (t === 'result' || t === 'error') return this._onTurnEnd(stepId, gen, t === 'error');
+      if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
+      if (this._turnLive) this._armStall(stepId, gen);     // live-turn activity → (re)arm the stall watchdog
     };
+  }
+
+  // Mid-turn stall watchdog (P09-S05, D-030): if a live turn goes stallMs with no session
+  // message, emit `stall` ONCE — notify-only, the turn itself is never touched. Re-armed by the
+  // next message (in _wrapSend), so each fresh silent window past the threshold notifies once.
+  // Cleared on turn end / teardown / pause. 0 (default) disables.
+  _armStall(stepId, gen) {
+    clearTimeout(this._stallTimer);
+    if (this.stallMs <= 0) return;
+    this._stallTimer = setTimeout(() => {
+      if (gen !== this._gen || !this._turnLive || this.paused) return;
+      this.emit('stall', { step: stepId, seconds: Math.round(this.stallMs / 1000) });
+    }, this.stallMs);
   }
 
   // A turn ended. If NEXT advanced, the step's work is done → fresh session, next step.
@@ -273,6 +290,7 @@ class Runner extends EventEmitter {
   _onTurnEnd(stepId, gen, isError) {
     if (gen !== this._gen || this.paused) return; // paused = interrupt ended the turn; keep the id to resume
     this._turnLive = false;
+    clearTimeout(this._stallTimer); // turn ended → the watchdog no longer applies
     // Master-plan (PLAN COMPLETE) session ended: tear down for a fresh context, then re-read
     // the pointer via _runNext — it names a new step (continue), 'none' (finish), or still
     // PLAN COMPLETE with _advancedPlan set (finish, no re-run). No settle/git guard here.
@@ -433,6 +451,7 @@ class Runner extends EventEmitter {
     this._resumeId = this._provider.currentSessionId(this.id);
     this.paused = true;
     this._turnLive = false;
+    clearTimeout(this._stallTimer); // no live turn to watch while paused
     this._provider.interrupt(this.id);
     this.emit('paused', { reason: this.manualPause
       ? `Paused ${this.currentStep} — click Resume to continue`
