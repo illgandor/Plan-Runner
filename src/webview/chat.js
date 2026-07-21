@@ -284,27 +284,48 @@
     const refresh = () => { submit.disabled = questions.some((q) => !answered(q)); };
     questions.forEach((q) => {
       const qEl = document.createElement('div'); qEl.className = 'perm-q';
+      if (q.header) { const chip = document.createElement('span'); chip.className = 'perm-qchip'; chip.textContent = q.header; qEl.appendChild(chip); }
       const label = document.createElement('div'); label.className = 'perm-qlabel'; label.textContent = q.question;
       qEl.appendChild(label);
       const opts = document.createElement('div'); opts.className = 'perm-opts';
+      const picks = new Set(); let otherText = '';   // per-question selection state
+      const compute = () => {
+        if (q.multiSelect) { const arr = [...picks]; if (otherText) arr.push(otherText); answers[q.question] = arr; }
+        else if (otherText) answers[q.question] = otherText;
+        else if (picks.size) answers[q.question] = [...picks][0];
+        else delete answers[q.question];
+        refresh();
+      };
+      const clearOther = () => { otherText = ''; other.value = ''; other.classList.remove('sel'); };
       (q.options || []).forEach((o) => {
+        const wrap = document.createElement('div'); wrap.className = 'perm-opt';
         const b = document.createElement('button');
         b.textContent = o.label;
         if (o.description) b.title = o.description;
         b.onclick = () => {
           if (q.multiSelect) {
-            const cur = answers[q.question] || (answers[q.question] = []);
-            const i = cur.indexOf(o.label);
-            if (i >= 0) { cur.splice(i, 1); b.classList.remove('sel'); } else { cur.push(o.label); b.classList.add('sel'); }
+            if (picks.has(o.label)) { picks.delete(o.label); b.classList.remove('sel'); }
+            else { picks.add(o.label); b.classList.add('sel'); }
           } else {
-            answers[q.question] = o.label;
+            picks.clear(); picks.add(o.label); clearOther();
             opts.querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
             b.classList.add('sel');
           }
-          refresh();
+          compute();
         };
-        opts.appendChild(b);
+        wrap.appendChild(b);
+        if (o.description) { const d = document.createElement('div'); d.className = 'perm-odesc'; d.textContent = o.description; wrap.appendChild(d); }
+        opts.appendChild(wrap);
       });
+      const other = document.createElement('input'); other.className = 'perm-other'; other.placeholder = 'Other…';
+      other.oninput = () => {
+        otherText = other.value.trim();
+        if (!q.multiSelect && otherText) { picks.clear(); opts.querySelectorAll('button').forEach((x) => x.classList.remove('sel')); }
+        other.classList.toggle('sel', !!otherText);
+        compute();
+      };
+      other.onkeydown = (e) => { if (e.key === 'Enter' && !submit.disabled) submit.click(); };
+      opts.appendChild(other);
       qEl.appendChild(opts); el.appendChild(qEl);
     });
     const row = document.createElement('div'); row.className = 'row';
