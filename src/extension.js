@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const session = require('./session');
 const engine = require('./engine');
 const mcp = require('./mcp');
-const { Runner } = require('./runner');
+const { Runner, readLedger, buildDigest } = require('./runner');
 const { isMasterPlan, readPointer, readPlanFraction } = require('./progress');
 const skills = require('./skills');
 const updater = require('./updater');
@@ -139,6 +139,7 @@ function ensureRunner() {
   runner.on('done', (d) => {
     post({ kind: 'done', ...d });
     runningStep = null; updateStatusBar();
+    postDigest(d.startedAtMs); // P09-S16: one "what did it do while I slept?" block at run end
     if (d.state === 'done') notify('done', 'info', `Plan Runner: ${d.detail || 'run complete'}`);
     else if (d.state === 'error') notify('error', 'warn', `Plan Runner: ${d.detail || 'run errored'}`);
   });
@@ -153,6 +154,18 @@ function ensureRunner() {
   runner.on('paused', (d) => { post({ kind: 'paused', reason: d.reason }); postUsage(usage.snapshot()); notify('paused', 'warn', `Plan Runner paused — ${d.reason}`); });
   runner.on('resumed', () => { post({ kind: 'resumed' }); postUsage(usage.snapshot()); lastNotify = null; });
   return runner;
+}
+
+// P09-S16: post the run digest (steps/tokens/wall) as one info block when a run ends. Reads the
+// ledger best-effort (D-017) — a missing/garbled file or no in-window records → nothing posted,
+// never an error at teardown.
+function postDigest(sinceMs) {
+  const p = project();
+  if (!p || sinceMs == null) return;
+  try {
+    const line = buildDigest(readLedger(p.path), sinceMs);
+    if (line) post({ kind: 'info', text: line });
+  } catch { /* digest is best-effort — never break run teardown */ }
 }
 
 // ---- Webview message handling ----

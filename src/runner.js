@@ -49,6 +49,39 @@ function appendLedger(cwd, record) {
   } catch { /* best-effort: a ledger write never affects the run */ }
 }
 
+// Read the run ledger back (best-effort inverse of appendLedger). Returns parsed records in append
+// order; a torn/garbled line is skipped and any read failure (missing file, unreadable) yields []
+// — the ledger is best-effort (D-017), so a caller can never be errored by it. Feeds buildDigest.
+function readLedger(cwd) {
+  try {
+    const out = [];
+    for (const line of fs.readFileSync(path.join(cwd, '.plan-runner', 'runs.jsonl'), 'utf8').split('\n')) {
+      const s = line.trim();
+      if (!s) continue;
+      try { out.push(JSON.parse(s)); } catch { /* skip one torn line, keep the rest */ }
+    }
+    return out;
+  } catch { return []; }
+}
+
+// Morning digest (P09-S16): roll a finished run's ledger records into one line — "what did it do
+// while I slept?" — without opening runs.jsonl. Keeps only records whose step started at/after the
+// run's start (sinceMs, append order is already chronological). Pure + exported for tests; no
+// in-window records → null so the caller posts nothing.
+function buildDigest(records, sinceMs) {
+  const rows = (records || []).filter((r) =>
+    r && !Number.isNaN(Date.parse(r.startedAt)) && Date.parse(r.startedAt) >= sinceMs);
+  if (!rows.length) return null;
+  const tokens = rows.reduce((sum, r) => sum + (Number(r.tokens) || 0), 0);
+  const first = rows[0].stepId, last = rows[rows.length - 1].stepId;
+  const span = first === last ? `${first}` : `${first} → ${last}`;
+  const endMs = Math.max(...rows.map((r) => Date.parse(r.endedAt) || Date.parse(r.startedAt)));
+  const mins = Math.max(0, Math.round((endMs - Date.parse(rows[0].startedAt)) / 60000));
+  const wall = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  return `Run digest: ${rows.length} step${rows.length === 1 ? '' : 's'} (${span}) · ` +
+    `${tokens} tokens · ${wall} wall`;
+}
+
 // Optional wall-clock ceiling (planRunner.stopAtTime, "HH:MM"). Pure so it's testable with an
 // injected clock. The reference is the RUN's start time: the target is today's HH:MM, or the next
 // day's if that's already at/before the run started (so an overnight "stop at 06:00" works). Empty
@@ -174,7 +207,7 @@ class Runner extends EventEmitter {
     this._advancedPlan = false;
     this.currentStep = null;
     this.emit('status', { state, detail });
-    this.emit('done', { state, detail });
+    this.emit('done', { state, detail, startedAtMs: this._startedAtMs }); // sinceMs for the run digest (P09-S16)
   }
 
   // The usage gate polls CLAUDE account usage; it's meaningless for a Codex run (different
@@ -511,4 +544,5 @@ class Runner extends EventEmitter {
   }
 }
 
-module.exports = { Runner, MAX_STEPS, MAX_RETRIES, RESUME_PROMPT, gitState, stopTimeReached, appendLedger };
+module.exports = { Runner, MAX_STEPS, MAX_RETRIES, RESUME_PROMPT, gitState, stopTimeReached,
+  appendLedger, readLedger, buildDigest };
