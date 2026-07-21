@@ -3,9 +3,22 @@
 // spends no Claude usage — fetch is faked, nothing spawns.
 const test = require('node:test');
 const assert = require('node:assert');
-const { UsageService, parseUsageText } = require('../src/usage');
+const { UsageService, parseUsageText, spawnArgs } = require('../src/usage');
 
 const REAL = 'Current session: 42% used\nCurrent week (all models): 71% used';
+
+test('spawnArgs routes a .cmd shim through the shell with a quoted path', () => {
+  const s = spawnArgs('C:\\Program Files\\nodejs\\claude.cmd');
+  assert.strictEqual(s.options.shell, true);
+  assert.strictEqual(s.command, '"C:\\Program Files\\nodejs\\claude.cmd"'); // quoted for spaces
+  assert.deepStrictEqual(s.args, ['-p', '/usage', '--output-format', 'json']);
+});
+
+test('spawnArgs spawns a real .exe directly (no shell)', () => {
+  const s = spawnArgs('C:\\bin\\claude.exe');
+  assert.strictEqual(s.command, 'C:\\bin\\claude.exe');
+  assert.notStrictEqual(s.options.shell, true);
+});
 
 test('parseUsageText reads % from a real /usage sample', () => {
   assert.deepStrictEqual(parseUsageText(REAL), { session: 42, week: 71 });

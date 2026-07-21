@@ -38,6 +38,17 @@ function cleanupUsageSession(sessionId) {
   } catch { /* best-effort */ }
 }
 
+// Build the spawn form for the resolved claude path. A Windows npm-global install is a
+// claude.cmd shim (P09-S06): a .cmd/.bat can't be exec'd directly, so route it through the
+// shell (Node runs it via cmd.exe) with the path quoted for spaces. A real .exe/binary is
+// spawned directly. Pure + exported so a unit test verifies the form without a live claude.
+function spawnArgs(claude) {
+  const args = ['-p', '/usage', '--output-format', 'json'];
+  const opts = { stdio: ['ignore', 'pipe', 'pipe'] };
+  if (/\.(cmd|bat)$/i.test(claude)) return { command: `"${claude}"`, args, options: { ...opts, shell: true } };
+  return { command: claude, args, options: opts };
+}
+
 // One real /usage call. stdin is closed ('ignore') to avoid the "no stdin data
 // received in 3s" stall the prototype hit calling claude non-interactively.
 function defaultFetch() {
@@ -46,7 +57,8 @@ function defaultFetch() {
     if (!claude) return resolve({ error: 'claude not found' }); // keeps last-good; never spawns null
     let out = '';
     let p;
-    try { p = spawn(claude, ['-p', '/usage', '--output-format', 'json'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
+    const { command, args, options } = spawnArgs(claude);
+    try { p = spawn(command, args, options); }
     catch (e) { return resolve({ error: e.message }); }
     p.stdout.on('data', (d) => { out += d; });
     p.on('error', (e) => resolve({ error: e.message }));
@@ -121,4 +133,4 @@ class UsageService extends EventEmitter {
   describe() { return `Paused: account usage ${this.max}% ≥ ${this.threshold}% — waiting for it to drop`; }
 }
 
-module.exports = { UsageService, defaultFetch, cleanupUsageSession, parseUsageText };
+module.exports = { UsageService, defaultFetch, cleanupUsageSession, parseUsageText, spawnArgs };

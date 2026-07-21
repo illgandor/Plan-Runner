@@ -8,12 +8,13 @@ const os = require('os');
 const path = require('path');
 const { findClaude, EXE } = require('../src/claude-path');
 
-function fakeExe(prefix) {
+function fakeBin(prefix, name) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const exe = path.join(dir, EXE);
-  fs.writeFileSync(exe, '');
-  return { dir, exe };
+  const bin = path.join(dir, name);
+  fs.writeFileSync(bin, '');
+  return { dir, exe: bin };
 }
+function fakeExe(prefix) { return fakeBin(prefix, EXE); }
 
 test('PLANRUNNER_CLAUDE override wins over PATH and bundled', () => {
   const { exe } = fakeExe('claudeov-');
@@ -37,4 +38,18 @@ test('bundled binary is the last-resort fallback', () => {
 test('returns null when env, PATH, and bundle are all gone', () => {
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'claudenone-'));
   assert.strictEqual(findClaude({ env: { PATH: empty }, bundled: null }), null);
+});
+
+// npm-global installs are a claude.cmd shim (no .exe) — Windows-only probe (P09-S06).
+test('a claude.cmd shim is found when it is the only install', { skip: process.platform !== 'win32' }, () => {
+  const { dir, exe: cmd } = fakeBin('claudecmd-', 'claude.cmd');
+  assert.strictEqual(findClaude({ env: { PATH: dir }, bundled: null }), cmd);
+});
+
+test('a real claude.exe anywhere beats a claude.cmd shim anywhere', { skip: process.platform !== 'win32' }, () => {
+  const { exe } = fakeExe('claudeexe-');
+  const { dir: cmdDir } = fakeBin('claudecmd-', 'claude.cmd');
+  // .cmd dir listed first on PATH — .exe must still win regardless of order.
+  const got = findClaude({ env: { PATH: cmdDir + path.delimiter + path.dirname(exe) }, bundled: null });
+  assert.strictEqual(got, exe);
 });
