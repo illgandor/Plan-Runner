@@ -454,6 +454,7 @@
     '- **Start** begins the autonomous run at `PROGRESS.md`\'s next step.',
     '- Each step runs in its own fresh session; a commit + pointer-advance ends it.',
     '- When a step needs you, the status turns to **needs-you** — answer in the composer and the loop continues.',
+    '- At a plan boundary, the close-out session first *audits* the finished plan — spot-checking each step against the repo and filing a gap step for anything marked done but unmet — before closing it.',
     '',
     '## Controls',
     '',

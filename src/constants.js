@@ -21,9 +21,11 @@ const CODEX_STEP_SUFFIX =
 // plan and, if one is QUEUED, activates it and re-points NEXT at its first step (else NEXT:
 // none). The runner then re-reads the pointer and continues or finishes — no owner transition.
 const MASTER_PLAN_PROMPT =
-  'Use the master-plan skill to close out this completed plan. If another plan is QUEUED, ' +
-  'activate it as the new ACTIVE plan and point ▶ NEXT STEP at its first step; if no plan ' +
-  'remains, set NEXT: none. Then STOP.';
+  'Use the master-plan skill to close out this completed plan. First audit it: spot-check each ' +
+  'completed step\'s Completion criteria against the actual repo, and if any criterion is unmet, ' +
+  'record an Amendment and add a gap step (or fix it in-session if trivial) instead of closing. ' +
+  'If another plan is QUEUED, activate it as the new ACTIVE plan and point ▶ NEXT STEP at its ' +
+  'first step; if no plan remains, set NEXT: none. Then STOP.';
 
 // Tools the runner may use unattended. Anything outside this ASKS you in the panel
 // (see session.makeCanUseTool) instead of auto-denying — that's the "needs you" prompt.
