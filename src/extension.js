@@ -210,6 +210,13 @@ async function onMessage(m) {
       session.resolveDialog({ requestId: m.requestId, answers: m.answers, cancelled: m.cancelled });
       break;
     case 'setEngine': {
+      if (runner && runner.running) {
+        // Engine is run-scoped: switching mid-run would desync the poller/session. Refuse and
+        // snap the dropdown back (the webview greys it too, this is the host-side backstop).
+        post({ kind: 'info', text: 'Stop the run to switch engine.' });
+        sendConfig();
+        break;
+      }
       const next = ENGINES.includes(m.value) ? m.value : 'claude';
       if (next === 'codex' && !require('./codex-path').findCodex()) {
         // Codex not installed: don't switch — tell the user and snap the dropdown back to Claude.

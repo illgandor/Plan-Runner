@@ -334,7 +334,7 @@
         break;
       case 'step-started': stepChip('▶ ' + (d.step || 'step')); cur = null; break;
       case 'step-done': stepChip(`✔ ${d.from} → ${d.to}`); cur = null; break;
-      case 'done': system('■ ' + (d.detail || d.state)); running = false; paused = false; reflect(); break;
+      case 'done': system('■ ' + (d.detail || d.state)); running = false; paused = false; resetTokens(); reflect(); break;
       case 'usage': usage(d); break;
       case 'paused': paused = true; reflect(); setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
       case 'resumed': paused = false; reflect(); setStatus({ state: 'running', detail: 'Resumed' }); break;
@@ -534,6 +534,9 @@
     $('pause').hidden = !running || engine === 'codex'; // Claude-only manual hold (P07-S02, D-023)
     $('pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
     $('run').title = running ? 'Graceful stop — finish the current step, then halt' : 'Start the autonomous loop';
+    // Engine is run-scoped (poller + session bind to it) — lock it while running (P09-S04).
+    $('engine').disabled = running;
+    $('engine').title = running ? 'Stop the run to switch engine' : 'Engine';
   }
   function insertAtCursor(ta, text) {
     const s = ta.selectionStart, e = ta.selectionEnd;
@@ -542,7 +545,10 @@
   }
 
   // ---- Composer wiring ----
-  $('run').onclick = () => vscode.postMessage({ type: running ? 'stop' : 'start' });
+  // Codex token counter is per-run: zero it at each run start (and on 'done') so a second run
+  // never shows the first run's total (P09-S04).
+  function resetTokens() { sessionTokens = 0; $('tokval').textContent = '—'; }
+  $('run').onclick = () => { if (!running) resetTokens(); vscode.postMessage({ type: running ? 'stop' : 'start' }); };
   $('abort').onclick = () => vscode.postMessage({ type: 'abort' }); // hard teardown now (P07-S01)
   $('pause').onclick = () => vscode.postMessage({ type: paused ? 'resume' : 'pause' }); // manual hold (P07-S02)
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });
