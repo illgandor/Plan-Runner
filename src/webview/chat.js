@@ -218,6 +218,7 @@
   function onSession(channel, payload) {
     if (channel === 'session:permission-request') return permission(payload);
     if (channel === 'session:dialog-request') return askDialog(payload);
+    if (channel === 'session:request-cancelled') return deactivateCard(payload.requestId);
     if (channel !== 'session:message') return;
     const m = payload.msg;
     switch (m.type) {
@@ -242,9 +243,22 @@
   }
   function fmt(n) { return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n); }
 
+  // Teardown (Stop/Abort) resolves a card's pending request host-side; the matching card here
+  // stops being interactive and becomes read-only history (its request can never be answered now).
+  function deactivateCard(requestId) {
+    const el = log.querySelector('.perm[data-request-id="' + CSS.escape(String(requestId)) + '"]');
+    if (!el || el.classList.contains('ended')) return;
+    el.classList.add('ended');
+    el.querySelectorAll('button, input, textarea').forEach((b) => { b.disabled = true; });
+    const note = document.createElement('div'); note.className = 'perm-ended'; note.textContent = 'session ended';
+    const row = el.querySelector('.row');
+    if (row) row.replaceWith(note); else el.appendChild(note);
+  }
+
   function permission(p) {
     const el = document.createElement('div');
     el.className = 'perm';
+    el.dataset.requestId = p.requestId;
     el.innerHTML = `<div>Claude wants to use a tool that isn't auto-allowed:</div>
       <div class="tool">${escapeHtml(p.toolName)} ${escapeHtml(JSON.stringify(p.input || {}).slice(0, 300))}</div>
       <div class="row"><button class="allow">Allow</button><button class="deny">Deny</button></div>`;
@@ -261,6 +275,7 @@
     const questions = p.questions || [];
     const el = document.createElement('div');
     el.className = 'perm';
+    el.dataset.requestId = p.requestId;
     const head = document.createElement('div'); head.textContent = 'Claude needs your input:';
     el.appendChild(head);
     const answers = {};   // question text -> chosen label (string) or labels (array, multiSelect)

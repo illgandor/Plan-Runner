@@ -120,6 +120,9 @@ details.think summary { cursor: pointer; opacity: .7; }
 .perm-opts button { flex: 0 1 auto; }
 .perm button.sel { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
 .perm button:disabled { opacity: .5; cursor: default; }
+/* Deactivated card after Stop/Abort (P09-S02): read-only history, no live request behind it */
+.perm.ended { border-color: var(--vscode-panel-border); opacity: .7; }
+.perm-ended { margin-top: 8px; font-size: 12px; font-style: italic; opacity: .7; }
 
 /* ---- Composer ---- */
 .composer { position: relative; border-top: 1px solid var(--vscode-panel-border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }

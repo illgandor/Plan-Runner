@@ -166,7 +166,10 @@ function resolveDialog(reply) {
 }
 function cancelDialogsFor(id) {
   for (const [rid, p] of pendingDialogs) {
-    if (p.id === id) { pendingDialogs.delete(rid); p.resolve({ cancelled: true }); }
+    if (p.id === id) {
+      pendingDialogs.delete(rid); p.resolve({ cancelled: true });
+      defaultSend('session:request-cancelled', { requestId: rid }); // deactivate its panel card (PLAN-09)
+    }
   }
 }
 
@@ -192,7 +195,10 @@ function resolvePermission(reply) {
 }
 function denyPendingFor(id) {
   for (const [rid, p] of pendingPerms) {
-    if (p.id === id) { pendingPerms.delete(rid); p.resolve({ decision: 'deny', message: 'Session stopped.' }); }
+    if (p.id === id) {
+      pendingPerms.delete(rid); p.resolve({ decision: 'deny', message: 'Session stopped.' });
+      defaultSend('session:request-cancelled', { requestId: rid }); // deactivate its panel card (PLAN-09)
+    }
   }
 }
 
