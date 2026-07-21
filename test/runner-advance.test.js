@@ -77,6 +77,40 @@ test('master-plan leaves pointer unchanged → finishes, does NOT run master-pla
   } finally { restore(); }
 });
 
+test('errored PLAN COMPLETE close-out → retries then needs-you, never "done" (P09-S03)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setImmediate'] });
+  const p = tempProject('PLAN COMPLETE');
+  // Every master-plan turn errors; the pointer never advances → it must land on needs-you.
+  const calls = { start: 0 };
+  const orig = {};
+  for (const k of ['start', 'stop', 'interrupt', 'currentSessionId', 'defaultSend']) orig[k] = session[k];
+  session.defaultSend = () => {};
+  session.interrupt = () => {};
+  session.currentSessionId = () => 'sess';
+  session.stop = () => {};
+  session.start = (args, hooks) => {
+    calls.start++;
+    hooks.send('session:message', { msg: { type: 'error' } });
+    return {};
+  };
+  try {
+    const r = new Runner(p);
+    r.retryBackoffMs = 10;
+    let done = null;
+    const states = [];
+    r.on('done', (d) => { done = d; });
+    r.on('status', (s) => states.push(s.state));
+
+    r.start();
+    t.mock.timers.tick(1000); // drain the backoff retries
+
+    assert.equal(done, null, 'never emits done for an errored close-out');
+    assert.equal(calls.start, 2, 'initial master-plan run + exactly one retry');
+    assert.equal(states[states.length - 1], 'needs-you', 'ends flagged needs-you, not "Plan complete"');
+    assert.ok(r.needsYou, 'needsYou is set');
+  } finally { for (const k of Object.keys(orig)) session[k] = orig[k]; }
+});
+
 test('NEXT: none finishes directly — no master-plan session started', (t) => {
   const p = tempProject('none');
   const { calls, restore } = fakeScripted(p.path, () => null);

@@ -197,6 +197,7 @@ class Runner extends EventEmitter {
     if (/^PLAN COMPLETE/i.test(next)) {
       if (this._advancedPlan) return this._finish('done', `Plan complete (${next})`);
       this._advancedPlan = true;
+      this._retries = 0; // fresh close-out → fresh error-retry budget (retries re-enter _runMasterPlan directly)
       return this._runMasterPlan();
     }
     // Proactive gate: don't START a step while account usage is at/above threshold (port app gate).
@@ -278,6 +279,14 @@ class Runner extends EventEmitter {
     if (this._planSession) {
       this._planSession = false;
       this._provider.stop(this.id);
+      // An errored close-out must NOT be read as "Plan complete" — retry the master-plan session
+      // once in a fresh context, then flag needs-you (P09-S03). A clean end continues.
+      if (isError) {
+        if (this._retries < 1) return this._retryPlan();
+        this.needsYou = true;
+        return this.emit('status', { state: 'needs-you', step: 'PLAN COMPLETE',
+          detail: `errored during plan close-out (retried ${this._retries}×) — answer in the panel, or Stop` });
+      }
       return setImmediate(() => this._runNext());
     }
     const after = readPointer(this.project.path);
@@ -326,6 +335,21 @@ class Runner extends EventEmitter {
     this._retryTimer = setTimeout(() => {
       if (this.stopRequested || this.paused) return;
       this._startSession(stepId, this._stepPrompt(), null);
+    }, wait);
+  }
+
+  // Plan-boundary retry (P09-S03): a master-plan close-out that errored is re-run ONCE in a fresh
+  // session after a backoff. _runMasterPlan re-sets _planSession; _retries is preserved (reset once
+  // at the boundary in _runNext, never here) so the second error drops straight to needs-you.
+  _retryPlan() {
+    this._retries++;
+    const wait = this.retryBackoffMs * this._retries;
+    this.emit('status', { state: 'running', step: 'PLAN COMPLETE',
+      detail: `plan close-out errored — retry ${this._retries}/1 in ${Math.round(wait / 1000)}s` });
+    clearTimeout(this._retryTimer);
+    this._retryTimer = setTimeout(() => {
+      if (this.stopRequested || this.paused) return;
+      this._runMasterPlan();
     }, wait);
   }
 
