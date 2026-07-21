@@ -150,6 +150,15 @@
     flush();
     addCopyButtons(el);
   }
+  // Thinking summary ticks "thinking… Ns" while streaming; stopThink() freezes it at the total (P09-S14).
+  let thinkTimer = null, thinkStart = 0, thinkSummary = null;
+  function tickThink() {
+    if (thinkSummary) thinkSummary.textContent = 'thinking… ' + Math.round((Date.now() - thinkStart) / 1000) + 's';
+  }
+  function stopThink() {
+    if (thinkTimer) { clearInterval(thinkTimer); thinkTimer = null; }
+    if (thinkSummary) { tickThink(); thinkSummary = null; }   // final label keeps the total
+  }
   function appendThinking(t) {
     const el = ensureAssistant();
     let d = el.querySelector('details.think');
@@ -157,9 +166,23 @@
       d = document.createElement('details'); d.className = 'think';
       d.innerHTML = '<summary>thinking…</summary><div class="think-body"></div>';
       el.appendChild(d);
+      thinkSummary = d.querySelector('summary'); thinkStart = Date.now();
+      tickThink(); thinkTimer = setInterval(tickThink, 1000);
     }
     d.querySelector('.think-body').appendChild(document.createTextNode(t));
     scroll();
+  }
+  // Muted per-turn stats line (duration · turns · ctx · cost); omit null fields, skip if all null (P09-S14).
+  function turnStats(m) {
+    const parts = [];
+    if (m.durationMs != null) parts.push(Math.round(m.durationMs / 1000) + 's');
+    if (m.numTurns != null) parts.push(m.numTurns + (m.numTurns === 1 ? ' turn' : ' turns'));
+    if (m.contextTokens != null) parts.push('ctx ' + fmt(m.contextTokens));
+    if (m.costUsd != null) parts.push('$' + m.costUsd.toFixed(2));
+    if (!parts.length) return;
+    const line = document.createElement('div');
+    line.className = 'turn-stats'; line.textContent = parts.join(' · ');
+    (cur || log).appendChild(line); scroll();
   }
   function toolUse(msg) {
     const el = ensureAssistant();
@@ -272,9 +295,10 @@
         if (m.contextTokens) { const c = $('ctx'); c.hidden = false; c.textContent = 'ctx ' + fmt(m.contextTokens); }
         if (m.turnTokens) { sessionTokens += m.turnTokens; $('tokval').textContent = fmt(sessionTokens); } // Codex counter
         finalizeMd(cur);                           // backstop: render any bubble that streamed without a trailing assistant-text
+        stopThink(); turnStats(m);                 // freeze thinking timer; append the muted stats line (P09-S14)
         cur = null; toolEls.clear();               // finalize this turn's group
         break;
-      case 'error': bubble('error', m.message || 'Error'); cur = null; break;
+      case 'error': stopThink(); bubble('error', m.message || 'Error'); cur = null; break;
     }
   }
   function fmt(n) { return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n); }
