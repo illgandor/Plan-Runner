@@ -110,7 +110,8 @@ details.think summary { cursor: pointer; opacity: .7; }
   background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-focusBorder);
 }
 .perm .tool { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; margin: 6px 0; opacity: .9; }
-.perm .row { display: flex; gap: 8px; margin-top: 8px; }
+.perm .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.perm-count { flex: 0 0 auto; font-size: 12px; opacity: .8; font-variant-numeric: tabular-nums; }
 .perm button { flex: 1; padding: 5px; border-radius: 4px; cursor: pointer; border: 1px solid var(--vscode-panel-border); font: inherit; }
 .perm button.allow { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
 /* AskUserQuestion option buttons (P06-S07) */

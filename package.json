@@ -79,6 +79,14 @@
           "maximum": 3600,
           "scope": "application",
           "description": "Optional mid-turn stall watchdog. When >0, a live turn that produces no output for this many seconds fires one OS notification + panel line so a hung stream is visible before morning. Notify-only — the turn is never killed or altered. 0 = off (default)."
+        },
+        "planRunner.autoSkipQuestionSeconds": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 3600,
+          "scope": "application",
+          "description": "Optional auto-skip for question cards (AskUserQuestion only, never permissions). When >0, an unattended question card shows a countdown and auto-Skips at zero so overnight runs never strand on a question. Any interaction with the card cancels the countdown. 0 = off (default)."
         }
       }
     },

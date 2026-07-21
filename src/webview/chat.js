@@ -47,6 +47,7 @@
   const log = $('log');
   const logoUri = app.dataset.logo || '';   // webview URI of src/webview/logo.png (from html())
   let enabled = false, running = false, engine = 'claude', paused = false;
+  let autoSkipSec = 0;   // >0 → question cards auto-Skip after this many seconds (D-028; never permissions)
   let sessionTokens = 0;          // Codex: running total of tokens processed this run (no usage % source)
   let cur = null;                 // current assistant message element being streamed into
   const toolEls = new Map();      // toolUseId -> tool <details> element
@@ -330,10 +331,32 @@
     });
     const row = document.createElement('div'); row.className = 'row';
     submit.className = 'allow'; submit.textContent = 'Submit';
-    submit.onclick = () => { vscode.postMessage({ type: 'dialog', requestId: p.requestId, answers }); el.remove(); };
+    const doSkip = (auto) => {
+      stopCountdown();
+      vscode.postMessage({ type: 'dialog', requestId: p.requestId, cancelled: true });
+      if (auto) system('■ question auto-skipped (' + autoSkipSec + 's)');
+      el.remove();
+    };
+    submit.onclick = () => { stopCountdown(); vscode.postMessage({ type: 'dialog', requestId: p.requestId, answers }); el.remove(); };
     const skip = document.createElement('button'); skip.textContent = 'Skip';
-    skip.onclick = () => { vscode.postMessage({ type: 'dialog', requestId: p.requestId, cancelled: true }); el.remove(); };
-    row.append(submit, skip); el.appendChild(row);
+    skip.onclick = () => doSkip(false);
+    row.append(submit, skip);
+    // Auto-skip countdown (D-028): unattended question cards Skip at zero; any interaction cancels.
+    let timer = null;
+    const stopCountdown = () => { if (timer) { clearInterval(timer); timer = null; count.remove(); } };
+    const count = document.createElement('span'); count.className = 'perm-count';
+    if (autoSkipSec > 0) {
+      let left = autoSkipSec;
+      count.textContent = 'Auto-skip in ' + left + 's';
+      row.appendChild(count);
+      timer = setInterval(() => {
+        if (--left <= 0) return doSkip(true);
+        count.textContent = 'Auto-skip in ' + left + 's';
+      }, 1000);
+      // Any interaction inside the card cancels the countdown (click any button, type Other).
+      ['click', 'input', 'keydown'].forEach((ev) => el.addEventListener(ev, stopCountdown, true));
+    }
+    el.appendChild(row);
     refresh();
     log.appendChild(el); scroll();
   }
@@ -347,6 +370,7 @@
         fill($('engine'), d.engines, d.engine);
         fill($('model'), d.models, d.model); fill($('effort'), d.efforts, d.effort); fill($('mode'), d.modes, d.mode);
         if (d.version) $('ver').textContent = 'v' + d.version;
+        autoSkipSec = d.autoSkipQuestionSeconds || 0;
         engine = d.engine; enabled = d.enabled; reflect(); break;
       case 'enabled': enabled = d.value; reflect(); break;
       case 'status':
@@ -377,6 +401,7 @@
     { key: 'maxStepsPerRun', label: 'Max steps / run (0 = off)', min: 0, max: 1000 },
     { key: 'stopAtTime', label: 'Stop at time (blank = off)', type: 'time' },
     { key: 'stallNotifySeconds', label: 'Stall notify (seconds, 0 = off)', min: 0, max: 3600 },
+    { key: 'autoSkipQuestionSeconds', label: 'Auto-skip question (seconds, 0 = off)', min: 0, max: 3600 },
   ];
   function closeSettings() { $('settingsmenu').hidden = true; }
   function renderSettings(values) {

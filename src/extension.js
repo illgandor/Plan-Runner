@@ -70,7 +70,8 @@ function sendConfig() {
   const c = caps();
   post({ kind: 'config', enabled: state.enabled, engine: state.engine,
     model: state.model, effort: state.effort, mode: state.mode, version: require('../package.json').version,
-    engines: ENGINES, models: c.models, efforts: c.efforts, modes: c.permissionModes });
+    engines: ENGINES, models: c.models, efforts: c.efforts, modes: c.permissionModes,
+    autoSkipQuestionSeconds: vscode.workspace.getConfiguration('planRunner').get('autoSkipQuestionSeconds', 0) });
 }
 // §Config keys — application-scoped, read the same in every window (D-004).
 function usageConfig() {
@@ -87,6 +88,7 @@ const SETTING_SPEC = {
   maxStepsPerRun: { min: 0, max: 1000, def: 0 },
   stopAtTime: { time: true, def: '' },
   stallNotifySeconds: { min: 0, max: 3600, def: 0 },
+  autoSkipQuestionSeconds: { min: 0, max: 3600, def: 0 },
 };
 function postSettings() {
   const c = vscode.workspace.getConfiguration('planRunner');
@@ -410,6 +412,7 @@ function activate(context) {
         runner.finalizeMs = usageConfig().finalizeSec * 1000; // live-apply the settle window
       if (e.affectsConfiguration('planRunner.stallNotifySeconds') && runner)
         runner.stallMs = vscode.workspace.getConfiguration('planRunner').get('stallNotifySeconds', 0) * 1000;
+      if (e.affectsConfiguration('planRunner.autoSkipQuestionSeconds')) sendConfig(); // re-post so the webview picks up the new value
     }),
   );
 }
