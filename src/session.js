@@ -131,35 +131,14 @@ function sdkOptions(cwd, options = {}) {
   // File checkpointing (P06-S06): snapshot files before edits so a bad step's changes can be
   // rolled back to step start (the step-start user message) via Query.rewindFiles(). (D-020)
   o.enableFileCheckpointing = true;
-  // AskUserQuestion (P06-S07): the CLI surfaces a structured multiple-choice question as a
-  // `request_user_dialog` of this kind. Declaring it here is what opts us in — the CLI fails
-  // closed on an undeclared kind (the question degrades to a plain refusal). onUserDialog (set
-  // in start(), needs the project id) renders the options as buttons and returns the choice.
-  o.supportedDialogKinds = [ASK_USER_QUESTION_DIALOG];
   return o;
 }
 
-// AskUserQuestion arrives as a user-dialog (not a canUseTool permission). We render its options
-// in the panel and answer with a PermissionResult carrying the picks, exactly as the CLI's own
-// inline answerer does: {behavior:'allow', updatedInput:{...input, answers:{[question]: label}}}.
-const ASK_USER_QUESTION_DIALOG = 'permission_ask_user_question';
+// AskUserQuestion is a normal built-in tool in this SDK (there is no `request_user_dialog` for it):
+// the CLI routes it through canUseTool, and we answer by injecting the picks as
+// updatedInput.answers. makeCanUseTool renders it as the choice card via this same panel path.
 let dialogSeq = 0;
 const pendingDialogs = new Map();
-function makeOnUserDialog(id) {
-  return (request) => new Promise((resolve) => {
-    // Unrecognized kind → cancel so the CLI applies the dialog's default (protocol requirement).
-    if (!request || request.dialogKind !== ASK_USER_QUESTION_DIALOG) return resolve({ behavior: 'cancelled' });
-    const payload = request.payload || {};
-    const requestId = 'dlg-' + (++dialogSeq);
-    pendingDialogs.set(requestId, { id, resolve: (reply) => {
-      if (reply && reply.answers && !reply.cancelled) {
-        resolve({ behavior: 'completed', result: { behavior: 'allow',
-          updatedInput: { ...(payload.input || {}), answers: reply.answers } } });
-      } else resolve({ behavior: 'cancelled' }); // Skip → CLI records it as skipped and moves on.
-    } });
-    defaultSend('session:dialog-request', { requestId, id, questions: payload.questions || [] });
-  });
-}
 function resolveDialog(reply) {
   const p = reply && pendingDialogs.get(reply.requestId);
   if (p) { pendingDialogs.delete(reply.requestId); p.resolve(reply); }
@@ -197,6 +176,19 @@ function isRemembered(id, toolName, input) {
 }
 function makeCanUseTool(id) {
   return (toolName, input) => new Promise((resolve) => {
+    // AskUserQuestion isn't a permission to allow/deny — it's a question to answer. Render the
+    // multiple-choice card (the panel's dialog path) and answer by injecting the picks as
+    // updatedInput.answers (the shape the CLI reads back). Skip/cancel → allow with NO answers so
+    // the model just moves on; never deny (that would error the tool). Kept out of the
+    // remember/allow-always path below — a question is always shown, never auto-allowed. (A-P09-02)
+    if (toolName === 'AskUserQuestion') {
+      const requestId = 'dlg-' + (++dialogSeq);
+      pendingDialogs.set(requestId, { id, resolve: (reply) => {
+        const answers = reply && reply.answers && !reply.cancelled ? reply.answers : null;
+        resolve({ behavior: 'allow', updatedInput: answers ? { ...input, answers } : input });
+      } });
+      return defaultSend('session:dialog-request', { requestId, id, questions: (input && input.questions) || [] });
+    }
     if (isRemembered(id, toolName, input)) return resolve({ behavior: 'allow', updatedInput: input });
     const requestId = 'perm-' + (++permSeq);
     pendingPerms.set(requestId, { id, resolve: (reply) => {
@@ -264,8 +256,7 @@ function start({ id, cwd, prompt, options }, hooks = {}) {
   stepStartMsg.delete(id); // fresh session → capture this step's step-start message anew (P06-S06)
   const input = inputQueue(prompt);
   const opts = sdkOptions(cwd, { ...options, claudePath });
-  opts.canUseTool = makeCanUseTool(id);
-  opts.onUserDialog = makeOnUserDialog(id); // renders AskUserQuestion options as buttons (P06-S07)
+  opts.canUseTool = makeCanUseTool(id); // also answers AskUserQuestion (renders the choice card)
   const entry = { q: null, input, aborted: false };
   sessions.set(id, entry);
   (async () => {

@@ -35,10 +35,9 @@ const ALLOWED_TOOLS = [
   'Bash(cargo:*)', 'Bash(npm:*)', 'Bash(pnpm:*)', 'Bash(yarn:*)',
   'Bash(node:*)', 'Bash(npx:*)', 'Bash(pytest:*)', 'Bash(go:*)',
   'Bash(codex:*)',  // Codex engine runs unattended (P02-S02); driven via `codex exec --json`.
-  // AskUserQuestion is safe to permit unattended: it can't touch the repo, it only surfaces a
-  // multiple-choice prompt (rendered as buttons via onUserDialog, P06-S07). Gating it would just
-  // add a redundant Allow click before the real question.
-  'AskUserQuestion',
+  // AskUserQuestion is deliberately NOT allowlisted: this SDK delivers it through canUseTool, and
+  // our handler answers it by injecting the picks as updatedInput.answers + rendering the choice
+  // card. Auto-allowing it would bypass that handler, so the tool returns with no answer (A-P09-02).
   // Railway MCP auto-allowed so deploy/provision steps run hands-off. Stripe stays gated.
   'mcp__railway',
 ];
