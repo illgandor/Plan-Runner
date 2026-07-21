@@ -100,6 +100,8 @@ details.think summary { cursor: pointer; opacity: .7; }
 .diff { margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--vscode-panel-border);
   font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; }
 .diff-path { opacity: .7; margin-bottom: 2px; }
+.path-link { color: var(--vscode-textLink-foreground); cursor: pointer; text-decoration: none; } /* P09-S12 */
+.path-link:hover { text-decoration: underline; }
 .diff-line { padding: 0 4px; }
 .diff-line.del { background: var(--vscode-diffEditor-removedTextBackground); }
 .diff-line.add { background: var(--vscode-diffEditor-insertedTextBackground); }

@@ -216,6 +216,14 @@ async function onMessage(m) {
       }
       break;
     }
+    case 'openFile': {   // P09-S12: clickable tool-row / diff paths open in the editor
+      const raw = String(m.path || '');
+      if (!raw) break;
+      const abs = path.isAbsolute(raw) ? raw : (p ? path.join(p.path, raw) : raw);
+      try { await vscode.window.showTextDocument(vscode.Uri.file(abs)); }   // rejects if missing → quiet info
+      catch { post({ kind: 'info', text: `Could not open ${raw}.` }); }
+      break;
+    }
     case 'permission':
       session.resolvePermission({ requestId: m.requestId, decision: m.decision });
       break;

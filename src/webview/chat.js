@@ -149,7 +149,8 @@
     const d = document.createElement('details'); d.className = 'tool';
     d.innerHTML = `<summary><span class="tool-status">⏳</span> <span class="tool-name"></span> <span class="tool-target"></span></summary>`;
     d.querySelector('.tool-name').textContent = msg.name;
-    d.querySelector('.tool-target').textContent = toolTarget(msg.input);   // path/command in the collapsed summary (P04-S03)
+    // path/command in the collapsed summary (P04-S03); an absolute-looking path is clickable (P09-S12)
+    setTarget(d.querySelector('.tool-target'), msg.input);
     const input = msg.input || {};
     if (input && (msg.name === 'Edit' || msg.name === 'Write' || msg.name === 'MultiEdit')) {
       d.appendChild(editDiff(msg.name, input));   // red/green line diff, not raw JSON (P04-S02)
@@ -169,6 +170,21 @@
       Object.values(input).find((x) => typeof x === 'string' && x);
     return typeof v === 'string' ? (v.length > 80 ? v.slice(0, 80) + '…' : v) : '';
   }
+  // Absolute-looking path: drive-letter (C:\ or C:/), UNC (\\host), or POSIX root (/). (P09-S12)
+  function looksLikePath(v) { return typeof v === 'string' && /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(v); }
+  // A span that opens the file in the editor on click; plain text display, full path in the message.
+  function pathLink(fullPath, display) {
+    const s = document.createElement('span');
+    s.className = 'path-link'; s.textContent = display; s.title = fullPath;
+    s.onclick = () => vscode.postMessage({ type: 'openFile', path: fullPath });
+    return s;
+  }
+  // Fill a tool-target element: clickable link when its path field is absolute-looking, else plain text.
+  function setTarget(elm, input) {
+    const full = input && (input.file_path || input.path);   // toolTarget shows these first, so display matches
+    if (looksLikePath(full)) elm.appendChild(pathLink(full, toolTarget(input)));
+    else elm.textContent = toolTarget(input);
+  }
   // Render a file-edit tool's input as a line-based red/green diff — no diff library (P04-S02).
   // Edit → old red / new green; Write → all green; MultiEdit → each edit in sequence.
   function editDiff(name, input) {
@@ -176,7 +192,9 @@
     wrap.className = 'diff';
     if (input.file_path) {
       const p = document.createElement('div'); p.className = 'diff-path';
-      p.textContent = input.file_path; wrap.appendChild(p);
+      if (looksLikePath(input.file_path)) p.appendChild(pathLink(input.file_path, input.file_path));
+      else p.textContent = input.file_path;   // relative/unusual paths stay plain (P09-S12)
+      wrap.appendChild(p);
     }
     const rows = [];
     const add = (text, cls) => String(text == null ? '' : text).split('\n').forEach((l) => rows.push([cls, l]));
