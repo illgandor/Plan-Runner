@@ -9,7 +9,7 @@ const session = require('./session');
 const engine = require('./engine');
 const mcp = require('./mcp');
 const { Runner } = require('./runner');
-const { isMasterPlan, readPointer } = require('./progress');
+const { isMasterPlan, readPointer, readPlanFraction } = require('./progress');
 const skills = require('./skills');
 const updater = require('./updater');
 const { UsageService } = require('./usage');
@@ -99,9 +99,13 @@ function postSettings() {
 // Frozen §Webview⇄host shape. `paused` reflects the Runner holding on the usage gate (S08).
 function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error }); }
 
+// " · done/total" from PROGRESS.md, or "" when unreadable/not a master-plan project (P09-S15).
+function planFrac(dir) { const f = readPlanFraction(dir); return f ? ` · ${f.done}/${f.total}` : ''; }
+
 function updateStatusBar() {
   const base = `$(${state.enabled ? 'play-circle' : 'circle-slash'}) Plan Runner: ${state.enabled ? 'On' : 'Off'}`;
-  statusItem.text = runningStep ? `${base} — ${runningStep}` : base;
+  const p = project();
+  statusItem.text = (runningStep ? `${base} — ${runningStep}` : base) + (p ? planFrac(p.path) : '');
   statusItem.tooltip = runningStep ? `Running ${runningStep}` : 'Toggle Plan Runner auto-run for this workspace';
   statusItem.show();
 }
@@ -131,7 +135,7 @@ function ensureRunner() {
     updateStatusBar();
   });
   runner.on('step-started', (s) => post({ kind: 'step-started', ...s }));
-  runner.on('step-done', (d) => post({ kind: 'step-done', ...d }));
+  runner.on('step-done', (d) => { post({ kind: 'step-done', ...d }); updateStatusBar(); }); // PROGRESS.md advanced → refresh fraction
   runner.on('done', (d) => {
     post({ kind: 'done', ...d });
     runningStep = null; updateStatusBar();
@@ -160,7 +164,7 @@ async function onMessage(m) {
       notifyIfAutoReviewGated(); // panel opened already on an auto-review-incapable Codex
       if (usage) postUsage(usage.snapshot()); // paint whatever's been read so far
       if (skillNote) post({ kind: 'info', text: skillNote });
-      post({ kind: 'splash', text: p ? `Workspace: ${p.name} — NEXT: ${readPointer(p.path) || '(none)'}` : 'Open a master-plan project folder to begin.' });
+      post({ kind: 'splash', text: p ? `Workspace: ${p.name}${planFrac(p.path)} — NEXT: ${readPointer(p.path) || '(none)'}` : 'Open a master-plan project folder to begin.' });
       break;
     case 'start': {
       if (!p) { const msg = 'Open a project folder first.'; post({ kind: 'info', text: msg }); vscode.window.showWarningMessage(msg); break; }

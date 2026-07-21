@@ -18,4 +18,14 @@ function readPointer(dir) {
   } catch { return null; }
 }
 
-module.exports = { progressPath, isMasterPlan, readPointer };
+// Overall plan progress from the Dashboard "**All plans: X/Y steps complete.**"
+// line, or null if unreadable / line absent (CONTRACTS §PLAN-09).
+function readPlanFraction(dir) {
+  try {
+    const m = fs.readFileSync(progressPath(dir), 'utf8')
+      .match(/\*\*All plans:\s*(\d+)\s*\/\s*(\d+)\s+steps? complete/i);
+    return m ? { done: +m[1], total: +m[2] } : null;
+  } catch { return null; }
+}
+
+module.exports = { progressPath, isMasterPlan, readPointer, readPlanFraction };
