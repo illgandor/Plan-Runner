@@ -179,11 +179,33 @@ function cancelDialogsFor(id) {
 // of our panel is that you're one click away, unlike the old headless loop.)
 let permSeq = 0;
 const pendingPerms = new Map();
+// "Allow always" (D-029): session-scoped, in-memory ONLY — never written to disk. Per project id
+// a Set of remember-keys; a remembered tool auto-allows with no card. Cleared on host restart
+// (module reload) since REMEMBER lives only here. (P09-S10)
+const REMEMBER = new Map(); // id -> Set<remember-key>
+// Remember-key: non-Bash → the toolName; Bash → Bash(<first command word>) so `gh pr view` and
+// `gh issue list` share one key but a different command word still asks.
+function rememberKey(toolName, input) {
+  if (toolName === 'Bash' && input && typeof input.command === 'string') {
+    return `Bash(${input.command.trim().split(/\s+/)[0] || ''})`;
+  }
+  return toolName;
+}
+function isRemembered(id, toolName, input) {
+  const s = REMEMBER.get(id);
+  return !!(s && s.has(rememberKey(toolName, input)));
+}
 function makeCanUseTool(id) {
   return (toolName, input) => new Promise((resolve) => {
+    if (isRemembered(id, toolName, input)) return resolve({ behavior: 'allow', updatedInput: input });
     const requestId = 'perm-' + (++permSeq);
     pendingPerms.set(requestId, { id, resolve: (reply) => {
-      if (reply && reply.decision === 'allow') resolve({ behavior: 'allow', updatedInput: input });
+      const decision = reply && reply.decision;
+      if (decision === 'allow-always') { // record the key, then allow like a normal allow
+        let s = REMEMBER.get(id); if (!s) { s = new Set(); REMEMBER.set(id, s); }
+        s.add(rememberKey(toolName, input));
+      }
+      if (decision === 'allow' || decision === 'allow-always') resolve({ behavior: 'allow', updatedInput: input });
       else resolve({ behavior: 'deny', message: (reply && reply.message) || 'Denied by the user.' });
     } });
     defaultSend('session:permission-request', { requestId, id, toolName, input });

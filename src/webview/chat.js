@@ -256,15 +256,30 @@
     if (row) row.replaceWith(note); else el.appendChild(note);
   }
 
+  // Mirror session.js rememberKey (D-029): non-Bash → toolName; Bash → Bash(<first command word>).
+  function rememberKey(toolName, input) {
+    if (toolName === 'Bash' && input && typeof input.command === 'string') {
+      return 'Bash(' + (input.command.trim().split(/\s+/)[0] || '') + ')';
+    }
+    return toolName;
+  }
   function permission(p) {
     const el = document.createElement('div');
     el.className = 'perm';
     el.dataset.requestId = p.requestId;
+    const summary = toolTarget(p.input);   // path/command instead of raw JSON (readability, P09-S10)
     el.innerHTML = `<div>Claude wants to use a tool that isn't auto-allowed:</div>
-      <div class="tool">${escapeHtml(p.toolName)} ${escapeHtml(JSON.stringify(p.input || {}).slice(0, 300))}</div>
-      <div class="row"><button class="allow">Allow</button><button class="deny">Deny</button></div>`;
+      <div class="tool">${escapeHtml(p.toolName)}${summary ? ' ' + escapeHtml(summary) : ''}</div>
+      <div class="row"><button class="allow">Allow</button>` +
+      `<button class="allow-always">Allow always</button><button class="deny">Deny</button></div>`;
     el.querySelector('.allow').onclick = () => { vscode.postMessage({ type: 'permission', requestId: p.requestId, decision: 'allow' }); el.remove(); };
     el.querySelector('.deny').onclick = () => { vscode.postMessage({ type: 'permission', requestId: p.requestId, decision: 'deny' }); el.remove(); };
+    el.querySelector('.allow-always').onclick = () => {
+      vscode.postMessage({ type: 'permission', requestId: p.requestId, decision: 'allow-always' });
+      const note = document.createElement('div'); note.className = 'perm-ended';
+      note.textContent = 'always allowed this session: ' + rememberKey(p.toolName, p.input);
+      el.querySelector('.row').replaceWith(note);
+    };
     log.appendChild(el); scroll();
   }
   function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
