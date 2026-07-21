@@ -67,6 +67,9 @@ async function checkAndUpdate(context, vscode) {
   // installExtension swallows bad-path errors, so validate the download ourselves first.
   const size = fs.statSync(dest).size;
   if (asset.size && size !== asset.size) throw new Error(`size ${size} != ${asset.size}`);
+  // Consent before installing (D-032) — decline just skips this cycle; next poll re-offers.
+  const consent = await vscode.window.showInformationMessage(`Plan Runner ${latest} downloaded — install now?`, 'Install');
+  if (consent !== 'Install') return;
   await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(dest));
   const pick = await vscode.window.showInformationMessage(`Plan Runner ${latest} installed.`, 'Reload Window');
   if (pick === 'Reload Window') vscode.commands.executeCommand('workbench.action.reloadWindow');

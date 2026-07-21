@@ -46,18 +46,29 @@ function servers(engine, statusByName = {}) {
   return listServers(readText(claudeConfigPath()), statusByName);
 }
 
+// A server name is safe to interpolate into the terminal command line only if it is a bare
+// token — anything else could smuggle shell metacharacters into sendText. Returns the quoted
+// arg, or null (which the caller reports) for a name we won't run.
+function serverArg(subcmd, server) {
+  if (!server) return subcmd;
+  if (!/^[\w.-]+$/.test(server)) return null;
+  return `${subcmd} "${server}"`;
+}
+
 // OAuth and confirmation prompts are interactive — a terminal is the only honest home.
 // Codex isn't on PATH, so we invoke its resolved binary; Claude is on PATH.
-function runCli(engine, args) {
+function runCli(engine, subcmd, server) {
+  const arg = serverArg(subcmd, server);
+  if (arg == null) { vscode().window.showInformationMessage(`Refusing MCP server name "${server}" — unexpected characters.`); return; }
   if (engine === 'codex') {
     const exe = findCodex();
     if (!exe) { vscode().window.showInformationMessage('Codex CLI not found — install it and run `codex login`, then try again.'); return; }
     const term = vscode().window.createTerminal('codex mcp');
-    term.show(); term.sendText(`"${exe}" mcp ${args}`);
+    term.show(); term.sendText(`"${exe}" mcp ${arg}`);
     return;
   }
   const term = vscode().window.createTerminal('claude mcp');
-  term.show(); term.sendText('claude mcp ' + args);
+  term.show(); term.sendText('claude mcp ' + arg);
 }
 
 // Open the active engine's MCP config file (or say it doesn't exist yet).
@@ -67,4 +78,4 @@ function openConfig(engine) {
   else vscode().window.showTextDocument(vscode().Uri.file(p));
 }
 
-module.exports = { listServers, listCodexServers, servers, runCli, openConfig };
+module.exports = { listServers, listCodexServers, servers, runCli, serverArg, openConfig };

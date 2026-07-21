@@ -315,8 +315,8 @@ async function onMessage(m) {
         if (p) { engine.provider(eng).stop(p.id); post({ kind: 'info', text: 'MCP: session reset — reconnects on the next run.' }); }
       } else if (m.action === 'open') mcp.openConfig(eng);
       else if (m.action === 'add') mcp.runCli(eng, 'add');
-      else if (m.action === 'remove' && m.server) mcp.runCli(eng, `remove ${m.server}`);
-      else if (m.action === 'get' && m.server) mcp.runCli(eng, `get ${m.server}`);
+      else if (m.action === 'remove' && m.server) mcp.runCli(eng, 'remove', m.server);
+      else if (m.action === 'get' && m.server) mcp.runCli(eng, 'get', m.server);
       break;
     }
   }
@@ -333,6 +333,7 @@ class ChatViewProvider {
     v.webview.html = html(v.webview);
     session.setSink((evt) => post(evt)); // SDK messages → panel
     v.webview.onDidReceiveMessage(onMessage);
+    v.onDidDispose(() => { view = null; }); // don't post() into a torn-down webview
   }
 }
 
