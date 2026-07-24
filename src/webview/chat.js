@@ -448,6 +448,7 @@
       case 'config':
         fill($('engine'), d.engines, d.engine);
         fill($('model'), d.models, d.model); fill($('effort'), d.efforts, d.effort); fill($('mode'), d.modes, d.mode);
+        decorateDefault($('model'), d.defaultModelResolved); decorateDefault($('effort'), d.defaultEffort);
         if (d.version) $('ver').textContent = 'v' + d.version;
         autoSkipSec = d.autoSkipQuestionSeconds || 0;
         engine = d.engine; enabled = d.enabled; reflect(); break;
@@ -642,6 +643,22 @@
       sel.appendChild(o);
     });
   }
+
+  // The '(default)' option reads just "default" when the dropdown is closed, but "default - <what it
+  // resolves to>" when open, so people see what Plan Runner's default actually is (S0093). Native
+  // <select> shows the same text open/closed, so we swap it on open (mousedown) and restore on close.
+  function defaultOption(sel) { return [...sel.options].find((o) => o.value === '(default)'); }
+  function decorateDefault(sel, resolved) {
+    const o = defaultOption(sel);
+    if (!o) return;
+    o.dataset.expanded = resolved ? ('default - ' + resolved) : 'default';
+    o.textContent = 'default'; // collapsed form (no parens)
+  }
+  function wireDefaultSwap(sel) {
+    const set = (open) => { const o = defaultOption(sel); if (o) o.textContent = open ? (o.dataset.expanded || 'default') : 'default'; };
+    sel.addEventListener('mousedown', () => set(true));
+    ['blur', 'change'].forEach((e) => sel.addEventListener(e, () => set(false)));
+  }
   let lastState;
   function setStatus(d) {
     const s = $('status'); s.textContent = d.detail || d.state;
@@ -697,6 +714,7 @@
   $('engine').onchange = (e) => vscode.postMessage({ type: 'setEngine', value: e.target.value });
   $('model').onchange = (e) => vscode.postMessage({ type: 'setModel', value: e.target.value });
   $('effort').onchange = (e) => vscode.postMessage({ type: 'setEffort', value: e.target.value });
+  wireDefaultSwap($('model')); wireDefaultSwap($('effort')); // collapsed "default" ↔ expanded "default - …" (S0093)
   $('mode').onchange = (e) => vscode.postMessage({ type: 'setMode', value: e.target.value });
   $('thresh').onchange = (e) => vscode.postMessage({ type: 'setThreshold', value: e.target.value });
   function send() {

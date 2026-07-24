@@ -22,6 +22,22 @@ const ENGINES = ['claude', 'codex'];
 function modelCache() { const c = ctx && ctx.globalState.get('planRunner.claudeModels'); return engine.validModelRows(c) ? c : null; }
 function caps() { return engine.capabilities(state.engine, modelCache()); }
 
+// Plan Runner's OWN defaults for the Claude "default" pick — not the SDK/CLI default (S0093).
+// Model = the latest Opus, 1M context (the `opus[1m]` alias auto-tracks the newest opus). Effort =
+// high (owner-chosen). effectiveModel/Effort map the picker's '(default)' to these at send time; the
+// picker still shows '(default)' and any explicit pick passes through untouched. Codex keeps its own default.
+const PR_DEFAULT_MODEL = 'opus[1m]';
+const PR_DEFAULT_EFFORT = 'high';
+function effectiveModel() { return (state.engine === 'claude' && state.model === '(default)') ? PR_DEFAULT_MODEL : state.model; }
+function effectiveEffort() { return (state.engine === 'claude' && state.effort === '(default)') ? PR_DEFAULT_EFFORT : state.effort; }
+// Resolved id of the default model (from the cached catalog) for the expanded "default - …" label;
+// null until the catalog is known (label then reads just "default"). Effort's default is the constant.
+function defaultModelResolved() {
+  if (state.engine !== 'claude') return null;
+  const r = (modelCache() || []).find((x) => x.value === PR_DEFAULT_MODEL);
+  return r ? (r.resolvedModel || r.value) : null;
+}
+
 // Cache the live CLI's model catalog (supportedModels() rows) account-wide and repaint the picker
 // if it changed. Rows carry the exact resolved version, so the dropdown shows versioned labels.
 // Never throws: model discovery is additive and best-effort; a bad/empty list keeps the last-good.
@@ -93,7 +109,7 @@ function workspaceDir() {
 function project() {
   const dir = workspaceDir();
   if (!dir) return null;
-  return { id: dir, path: dir, name: path.basename(dir), engine: state.engine, model: state.model, effort: state.effort, mode: state.mode,
+  return { id: dir, path: dir, name: path.basename(dir), engine: state.engine, model: effectiveModel(), effort: effectiveEffort(), mode: state.mode,
     maxTurns: vscode.workspace.getConfiguration('planRunner').get('maxTurns', 0),
     maxStepsPerRun: vscode.workspace.getConfiguration('planRunner').get('maxStepsPerRun', 0),
     stopAtTime: vscode.workspace.getConfiguration('planRunner').get('stopAtTime', '') };
@@ -105,6 +121,8 @@ function sendConfig() {
   post({ kind: 'config', enabled: state.enabled, engine: state.engine,
     model: state.model, effort: state.effort, mode: state.mode, version: require('../package.json').version,
     engines: ENGINES, models: c.models, efforts: c.efforts, modes: c.permissionModes,
+    // The expanded "default - …" labels: what Plan Runner's default model/effort resolve to (S0093).
+    defaultModelResolved: defaultModelResolved(), defaultEffort: state.engine === 'claude' ? PR_DEFAULT_EFFORT : null,
     autoSkipQuestionSeconds: vscode.workspace.getConfiguration('planRunner').get('autoSkipQuestionSeconds', 0) });
 }
 // §Config keys — application-scoped, read the same in every window (D-004).
@@ -245,7 +263,7 @@ async function onMessage(m) {
       if (!p) return;
       if (runner && runner.running) runner.answer(m.text);        // continues the live step
       else engine.provider(p.engine).chat({ id: p.id, cwd: p.path, prompt: m.text, // plain chat when not auto-running
-        options: { model: state.model, effort: state.effort, permissionMode: state.mode } });
+        options: { model: p.model, effort: p.effort, permissionMode: p.mode } }); // p.* already mapped via effectiveModel/Effort
       break;
     case 'interrupt':
       if (p) engine.provider(p.engine).interrupt(p.id);
