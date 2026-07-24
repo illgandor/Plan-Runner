@@ -30,12 +30,25 @@ const PR_DEFAULT_MODEL = 'opus[1m]';
 const PR_DEFAULT_EFFORT = 'high';
 function effectiveModel() { return (state.engine === 'claude' && state.model === '(default)') ? PR_DEFAULT_MODEL : state.model; }
 function effectiveEffort() { return (state.engine === 'claude' && state.effort === '(default)') ? PR_DEFAULT_EFFORT : state.effort; }
-// Resolved id of the default model (from the cached catalog) for the expanded "default - …" label;
-// null until the catalog is known (label then reads just "default"). Effort's default is the constant.
+// Resolved id of the default model for the expanded "default - …" label. Primary source is the
+// last init.model seen while default was picked (100% reliable — every session reports it; persisted
+// so it survives reloads); the catalog is a secondary source. Null only before the first default run
+// AND with no catalog → label reads just "default". (S0094: catalog fetch is flaky, init.model isn't.)
 function defaultModelResolved() {
   if (state.engine !== 'claude') return null;
-  const r = (modelCache() || []).find((x) => x.value === PR_DEFAULT_MODEL);
-  return r ? (r.resolvedModel || r.value) : null;
+  const rows = modelCache() || []; // catalog wins when present (reflects a CLI upgrade immediately)…
+  const r = rows.find((x) => x.value === PR_DEFAULT_MODEL)
+         || rows.find((x) => /\[1m\]$/.test(x.value || '') && /opus/i.test((x.value || '') + (x.resolvedModel || '')));
+  if (r) return r.resolvedModel || r.value;
+  return ctx.globalState.get('planRunner.defaultModelResolved') || null; // …else the last default run's init.model
+}
+// A session started: if the default is the active pick, its init.model IS what "default" resolves to —
+// remember it so the label is reliable regardless of the catalog request. (S0094)
+function onInitModel(model) {
+  if (!model || state.engine !== 'claude' || state.model !== '(default)') return;
+  if (ctx.globalState.get('planRunner.defaultModelResolved') === model) return;
+  ctx.globalState.update('planRunner.defaultModelResolved', model);
+  sendConfig(); // refresh the "default - <model>" label
 }
 
 // Cache the live CLI's model catalog (supportedModels() rows) account-wide and repaint the picker
@@ -413,7 +426,13 @@ class ChatViewProvider {
     };
     v.webview.html = html(v.webview);
     // SDK messages → panel; the model catalog is host-only (cached + repainted, never posted raw).
-    session.setSink((evt) => { if (evt.channel === 'session:models') return onModels(evt.payload); post(evt); });
+    // init.model is also captured host-side to keep the "default - <model>" label reliable (S0094).
+    session.setSink((evt) => {
+      if (evt.channel === 'session:models') return onModels(evt.payload);
+      if (evt.channel === 'session:message' && evt.payload && evt.payload.msg && evt.payload.msg.type === 'init')
+        onInitModel(evt.payload.msg.model);
+      post(evt);
+    });
     v.webview.onDidReceiveMessage(onMessage);
     v.onDidDispose(() => { view = null; }); // don't post() into a torn-down webview
   }
