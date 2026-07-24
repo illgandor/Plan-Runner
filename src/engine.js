@@ -21,17 +21,28 @@ const CLAUDE_CAPS = {
   ],
 };
 
+// A model comes in a standard- and a 1M-context (`[1m]`) form (e.g. `claude-opus-5` and
+// `claude-opus-5[1m]`). Prefer the 1M form: when a family has a `[1m]` variant, drop its
+// standard-context sibling so only the larger-context one is offered (owner ruling S0092).
+function preferLargeContext(rows) {
+  const is1m = (r) => /\[1m\]$/.test(r.value || '') || /\[1m\]$/.test(r.resolvedModel || '');
+  const base = (r) => (r.resolvedModel || r.value || '').replace(/\[1m\]$/, '');
+  const has1m = new Set(rows.filter(is1m).map(base));
+  return rows.filter((r) => is1m(r) || !has1m.has(base(r)));
+}
+
 // ModelInfo[] (from Query.supportedModels(), reported by the user's own CLI) → the model dropdown
 // items as {value,label} objects: value = the id the SDK accepts, label = the friendly name WITH
-// the exact resolved version (e.g. "Opus · claude-opus-5"), so the picker shows the version and a
-// newly-released model appears the moment the CLI knows it. `(default)` (omit → CLI picks) stays
-// first; the CLI's own "default" row is dropped as redundant. Empty/absent rows → the stable alias
+// the exact resolved version (e.g. "Opus (1M context) · claude-opus-5[1m]"), so the picker shows the
+// version and a newly-released model appears the moment the CLI knows it. `(default)` (omit → CLI
+// picks) stays first; the CLI's own "default" row is dropped as redundant, and the standard-context
+// sibling of any 1M model is dropped (preferLargeContext). Empty/absent rows → the stable alias
 // strings (the fail-safe: a failed/old supportedModels() never empties the dropdown). (P10)
 function claudeModels(rows) {
   if (!Array.isArray(rows) || !rows.length) return CLAUDE_ALIASES.slice();
   const out = [{ value: '(default)', label: '(default)' }];
   const seen = new Set(['(default)', 'default']);
-  for (const r of rows) {
+  for (const r of preferLargeContext(rows)) {
     if (!r || !r.value || seen.has(r.value)) continue;
     seen.add(r.value);
     const name = r.displayName || r.value;
@@ -44,6 +55,13 @@ function claudeModels(rows) {
 // used host-side to validate/clamp the persisted selection against the current list.
 function modelValues(models) {
   return (models || []).map((m) => (typeof m === 'string' ? m : m && m.value)).filter(Boolean);
+}
+
+// True only for a well-formed supportedModels() cache: a non-empty array of {value,…} row objects.
+// Guards against a stale pre-v0.2.6 cache (which stored plain value strings) or corruption — an
+// invalid cache is ignored so the picker falls back to aliases AND the host re-seeds. (S0092)
+function validModelRows(rows) {
+  return Array.isArray(rows) && rows.length > 0 && rows.every((r) => r && typeof r === 'object' && r.value);
 }
 
 // provider(id) → the module driving that engine. Lazy require of codex.js so engine.js
@@ -61,4 +79,4 @@ function capabilities(id, modelRows) {
   return { ...CLAUDE_CAPS, models: claudeModels(modelRows) };
 }
 
-module.exports = { provider, capabilities, claudeModels, modelValues, CLAUDE_CAPS };
+module.exports = { provider, capabilities, claudeModels, modelValues, validModelRows, CLAUDE_CAPS };

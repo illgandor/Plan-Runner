@@ -19,7 +19,8 @@ const { UsageService } = require('./usage');
 // The Claude model list is enriched with whatever the user's CLI last reported (cached in
 // globalState, account-wide) so a newly-released model appears without an extension update.
 const ENGINES = ['claude', 'codex'];
-function caps() { return engine.capabilities(state.engine, ctx && ctx.globalState.get('planRunner.claudeModels')); }
+function modelCache() { const c = ctx && ctx.globalState.get('planRunner.claudeModels'); return engine.validModelRows(c) ? c : null; }
+function caps() { return engine.capabilities(state.engine, modelCache()); }
 
 // Cache the live CLI's model catalog (supportedModels() rows) account-wide and repaint the picker
 // if it changed. Rows carry the exact resolved version, so the dropdown shows versioned labels.
@@ -37,10 +38,11 @@ function cacheModelRows(rows) {
 // From the `session:models` sink event (a real run reported its catalog).
 function onModels(payload) { cacheModelRows(payload && payload.models); }
 // One-shot proactive seed so the versioned picker appears WITHOUT starting a run: only for Claude,
-// only when the cache is empty, best-effort (fetchModels swallows all failure to []). (P10)
+// only when the cache isn't already valid rows (empty OR a stale pre-v0.2.6 string cache → re-fetch),
+// best-effort (fetchModels swallows all failure to []). (P10 · S0092)
 function seedModels() {
   if (state.engine !== 'claude') return;
-  if ((ctx.globalState.get('planRunner.claudeModels') || []).length) return;
+  if (modelCache()) return;
   const cwd = workspaceDir() || require('os').homedir();
   session.fetchModels(cwd).then(cacheModelRows).catch(() => {});
 }
@@ -51,7 +53,12 @@ function seedModels() {
 function clampSelections() {
   const c = caps();
   const modelIds = engine.modelValues(c.models); // items may be {value,label} objects now
-  if (!modelIds.includes(state.model)) { state.model = modelIds[0]; ctx.workspaceState.update('planRunner.model', state.model); }
+  if (!modelIds.includes(state.model)) {
+    // A dropped standard-context pick (e.g. 'opus') migrates to its 1M sibling if offered, else (default).
+    const oneM = state.model + '[1m]';
+    state.model = modelIds.includes(oneM) ? oneM : modelIds[0];
+    ctx.workspaceState.update('planRunner.model', state.model);
+  }
   if (!c.efforts.includes(state.effort)) { state.effort = c.efforts[0]; ctx.workspaceState.update('planRunner.effort', state.effort); }
   if (!c.permissionModes.some((pm) => pm.value === state.mode)) { state.mode = c.permissionModes[0].value; ctx.workspaceState.update('planRunner.mode', state.mode); }
 }
