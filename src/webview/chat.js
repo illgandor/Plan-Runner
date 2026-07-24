@@ -10,6 +10,7 @@
       <button id="run" class="primary">▶ Start</button>
       <select id="engine" title="Engine"></select>
       <select id="model" title="Model"></select>
+      <span class="ver" id="rmodel" title="Exact model the running session resolved to" hidden></span>
       <select id="effort" title="Reasoning effort"></select>
       <select id="mode" title="Permission mode"></select>
       <span class="spacer"></span>
@@ -281,7 +282,11 @@
     if (channel !== 'session:message') return;
     const m = payload.msg;
     switch (m.type) {
-      case 'init': break; // MCP status lives in the 🔌 button now — no per-session/reply banner
+      case 'init': { // MCP status lives in the 🔌 button; show the exact model this session resolved to
+        const r = $('rmodel');
+        if (m.model) { r.textContent = '→ ' + m.model; r.hidden = false; } else { r.hidden = true; }
+        break;
+      }
       case 'text-delta': appendText(m.text); if (cur) cur.dataset.delta = '1'; break; // mark: streamed live
       case 'assistant-text':
         if (cur && cur.dataset.delta) { finalizeMd(cur); cur = null; break; }  // streamed via text-delta — render, skip the dupe text

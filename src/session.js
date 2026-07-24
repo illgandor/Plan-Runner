@@ -38,7 +38,9 @@ function toolResultText(content) {
 // Ported verbatim from claude-session.js so the webview renders exactly like v2 did.
 function mapMessage(m) {
   if (m.type === 'system' && m.subtype === 'init') {
-    return [{ type: 'init', sessionId: m.session_id, slashCommands: m.slash_commands || [],
+    // m.model is the EXACT id the alias/selection resolved to (e.g. 'claude-opus-5-…') — the panel
+    // shows it so you can see which version actually ran. Absent on an older CLI → omitted.
+    return [{ type: 'init', sessionId: m.session_id, model: m.model || null, slashCommands: m.slash_commands || [],
       mcpServers: (m.mcp_servers || []).map((s) => ({ name: s.name, status: s.status })) }];
   }
   if (m.type === 'stream_event') {
@@ -225,6 +227,28 @@ function currentSessionId(id) { return sessionIds.get(id) || null; }
 // an init message; the MCP panel shows 'unknown' for anything not seen yet (S09 Carryover).
 const mcpStatusByProject = new Map();
 function mcpStatus(id) { return mcpStatusByProject.get(id) || {}; }
+// Last resolved model id per project (from init.model) — the exact version the last session ran.
+const resolvedModelByProject = new Map();
+function resolvedModel(id) { return resolvedModelByProject.get(id) || null; }
+// Last ModelInfo rows the live CLI reported per project (Query.supportedModels()) — the dynamic
+// model catalog. Fetched once per session; empty until a session inits (aliases cover the gap).
+const supportedModelsByProject = new Map();
+function supportedModels(id) { return supportedModelsByProject.get(id) || []; }
+
+// Fire-and-forget: ask the LIVE session's CLI for its full model list and publish it as a
+// `session:models` sink event. Piggybacks on the runner/chat session we already started (no extra
+// probe). Any failure (old SDK without the method, thrown call, non-array) is swallowed — the
+// dropdown falls back to the stable aliases, so this can never break a run. (P10 model discovery)
+function fetchSupportedModels(id, entry) {
+  const q = entry && entry.q;
+  if (!q || typeof q.supportedModels !== 'function') return;
+  Promise.resolve().then(() => q.supportedModels()).then((infos) => {
+    if (entry.aborted || !Array.isArray(infos)) return;
+    const rows = infos.map((m) => ({ value: m.value, resolvedModel: m.resolvedModel })).filter((m) => m.value);
+    supportedModelsByProject.set(id, rows);
+    defaultSend('session:models', { id, models: rows });
+  }).catch(() => { /* model-list discovery is best-effort — never surface as a chat error */ });
+}
 // First user-message uuid of the CURRENT live session per project — the SDK file-checkpoint
 // anchor ("step start"). rewindFiles(id, thisUuid) rolls the step's edits back to before its
 // prompt ran. Reset when a fresh session starts (see start()). (P06-S06)
@@ -271,6 +295,8 @@ function start({ id, cwd, prompt, options }, hooks = {}) {
         if (m.type === 'user' && m.uuid && !stepStartMsg.has(id)) stepStartMsg.set(id, m.uuid);
         for (const msg of mapMessage(m)) {
           if (msg.type === 'init' && msg.sessionId) sessionIds.set(id, msg.sessionId);
+          if (msg.type === 'init' && msg.model) resolvedModelByProject.set(id, msg.model);
+          if (msg.type === 'init') fetchSupportedModels(id, entry); // once per session; publishes session:models
           if (msg.type === 'init' && msg.mcpServers)
             mcpStatusByProject.set(id, Object.fromEntries(msg.mcpServers.map((s) => [s.name, s.status])));
           send('session:message', { id, msg });
@@ -320,4 +346,4 @@ function stop(id) {
 
 module.exports = { start, send, chat, stop, interrupt, currentSessionId, mcpStatus, mapMessage,
   setQuery, getQuery, sdkOptions, modeToPermission, resolvePermission, resolveDialog, setSink, defaultSend, sessions,
-  stepStartMessageId, rewindFiles };
+  stepStartMessageId, rewindFiles, resolvedModel, supportedModels };
