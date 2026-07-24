@@ -35,31 +35,36 @@ test("capabilities('claude') with no dynamic models returns the existing lists (
   });
 });
 
-// P10 model discovery: ModelInfo[] → flat id list (alias value + explicit resolvedModel).
-test('claudeModelValues flattens each row to value + resolvedModel (deduped per row)', () => {
-  assert.deepStrictEqual(engine.claudeModelValues([
-    { value: 'opus', resolvedModel: 'claude-opus-5-20260514' },
-    { value: 'sonnet', resolvedModel: 'claude-sonnet-5' },
-    { value: 'claude-haiku-4-5', resolvedModel: 'claude-haiku-4-5' }, // same → no dupe
-    { resolvedModel: 'orphan' }, // no value → skipped
-    null,
-  ]), ['opus', 'claude-opus-5-20260514', 'sonnet', 'claude-sonnet-5', 'claude-haiku-4-5']);
-  assert.deepStrictEqual(engine.claudeModelValues(undefined), []); // no session yet → empty
+// P10 model discovery: supportedModels() rows → {value,label} items with the resolved VERSION in
+// the label (real CLI shape: value is the id to pass, resolvedModel is the exact version).
+test('claudeModels builds versioned {value,label} items, (default) first, CLI default row dropped', () => {
+  const rows = [
+    { value: 'default', resolvedModel: 'claude-opus-5[1m]', displayName: 'Default (recommended)' },
+    { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus' },
+    { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet' },
+    { value: 'opus', resolvedModel: 'x', displayName: 'dupe' }, // dup value → dropped
+    { resolvedModel: 'orphan' }, // no value → dropped
+  ];
+  assert.deepStrictEqual(engine.claudeModels(rows), [
+    { value: '(default)', label: '(default)' },
+    { value: 'opus', label: 'Opus · claude-opus-5' },   // <- exact version shown in the picker
+    { value: 'sonnet', label: 'Sonnet · claude-sonnet-5' },
+  ]);
 });
 
-test('mergeClaudeModels keeps aliases first, dedups, and appends new ids (opus 5 available, no app update)', () => {
-  const merged = engine.mergeClaudeModels(['opus', 'claude-opus-5-20260514', 'sonnet']);
-  // aliases stay in place; the explicit new id is appended; the alias dupes drop
-  assert.deepStrictEqual(merged,
-    ['(default)', 'fable', 'opus', 'sonnet', 'haiku', 'claude-opus-5-20260514']);
-  // empty / absent dynamic list → exactly the stable aliases (never an empty dropdown)
-  assert.deepStrictEqual(engine.mergeClaudeModels([]), ['(default)', 'fable', 'opus', 'sonnet', 'haiku']);
-  assert.deepStrictEqual(engine.mergeClaudeModels(), ['(default)', 'fable', 'opus', 'sonnet', 'haiku']);
+test('claudeModels falls back to the stable alias strings when there are no rows (never empty)', () => {
+  assert.deepStrictEqual(engine.claudeModels([]), ['(default)', 'fable', 'opus', 'sonnet', 'haiku']);
+  assert.deepStrictEqual(engine.claudeModels(undefined), ['(default)', 'fable', 'opus', 'sonnet', 'haiku']);
 });
 
-test("capabilities('claude', dynamic) enriches only the model list; efforts/modes unchanged", () => {
-  const c = engine.capabilities('claude', ['claude-opus-5-20260514']);
-  assert.ok(c.models.includes('claude-opus-5-20260514'), 'new id is selectable');
-  assert.ok(c.models.includes('opus'), 'alias still present');
+test('modelValues extracts value strings from mixed alias-string / {value} lists', () => {
+  assert.deepStrictEqual(engine.modelValues(['(default)', 'opus']), ['(default)', 'opus']);
+  assert.deepStrictEqual(engine.modelValues([{ value: '(default)' }, { value: 'opus' }]), ['(default)', 'opus']);
+});
+
+test("capabilities('claude', rows) builds the versioned model list; efforts/modes unchanged", () => {
+  const c = engine.capabilities('claude', [{ value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus' }]);
+  assert.deepStrictEqual(engine.modelValues(c.models), ['(default)', 'opus']);
+  assert.ok(c.models.some((m) => m.label === 'Opus · claude-opus-5'), 'label carries the version');
   assert.deepStrictEqual(c.efforts, ['(default)', 'low', 'medium', 'high', 'xhigh', 'max']);
 });

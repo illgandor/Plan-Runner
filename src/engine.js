@@ -8,7 +8,7 @@
 // MODES (no change, D-012). The SINGLE source of truth now; extension.js imports these.
 // The alias models auto-resolve to the newest version of each family via the user's PATH
 // `claude` (not bundled — P06-S10/D-019), so "opus" already means the latest opus without an
-// app update. The explicit version ids come from the live CLI at runtime (see mergeClaudeModels).
+// app update. Explicit versioned labels come from the live CLI at runtime (see claudeModels).
 const CLAUDE_ALIASES = ['(default)', 'fable', 'opus', 'sonnet', 'haiku'];
 const CLAUDE_CAPS = {
   models: CLAUDE_ALIASES,
@@ -21,29 +21,29 @@ const CLAUDE_CAPS = {
   ],
 };
 
-// ModelInfo[] (from Query.supportedModels(), reported by the user's own CLI) → a flat list of
-// selectable model-id strings: each row's alias `value` AND its explicit `resolvedModel` (e.g.
-// 'opus' + 'claude-opus-5-…'), so a new model is pickable/pinnable the moment the CLI knows it.
-function claudeModelValues(infos) {
-  const out = [];
-  for (const m of infos || []) {
-    if (!m || !m.value) continue; // a row with no usable id is malformed — skip it wholesale
-    out.push(m.value);
-    if (m.resolvedModel && m.resolvedModel !== m.value) out.push(m.resolvedModel);
+// ModelInfo[] (from Query.supportedModels(), reported by the user's own CLI) → the model dropdown
+// items as {value,label} objects: value = the id the SDK accepts, label = the friendly name WITH
+// the exact resolved version (e.g. "Opus · claude-opus-5"), so the picker shows the version and a
+// newly-released model appears the moment the CLI knows it. `(default)` (omit → CLI picks) stays
+// first; the CLI's own "default" row is dropped as redundant. Empty/absent rows → the stable alias
+// strings (the fail-safe: a failed/old supportedModels() never empties the dropdown). (P10)
+function claudeModels(rows) {
+  if (!Array.isArray(rows) || !rows.length) return CLAUDE_ALIASES.slice();
+  const out = [{ value: '(default)', label: '(default)' }];
+  const seen = new Set(['(default)', 'default']);
+  for (const r of rows) {
+    if (!r || !r.value || seen.has(r.value)) continue;
+    seen.add(r.value);
+    const name = r.displayName || r.value;
+    out.push({ value: r.value, label: r.resolvedModel ? `${name} · ${r.resolvedModel}` : name });
   }
   return out;
 }
 
-// Union of the stable aliases with the CLI-discovered ids, deduped, aliases FIRST so the dropdown
-// is never empty and today's default path is byte-for-byte preserved when `dynamic` is empty/absent
-// (the fail-safe: a failed/old supportedModels() just falls back to the aliases). (P10 model discovery)
-function mergeClaudeModels(dynamic) {
-  const out = [];
-  const seen = new Set();
-  for (const v of [...CLAUDE_ALIASES, ...(dynamic || [])]) {
-    if (v && !seen.has(v)) { seen.add(v); out.push(v); }
-  }
-  return out;
+// Value strings from a model list that may hold plain-string aliases OR {value,label} objects —
+// used host-side to validate/clamp the persisted selection against the current list.
+function modelValues(models) {
+  return (models || []).map((m) => (typeof m === 'string' ? m : m && m.value)).filter(Boolean);
 }
 
 // provider(id) → the module driving that engine. Lazy require of codex.js so engine.js
@@ -53,12 +53,12 @@ function provider(id) {
   return require('./session');
 }
 
-// capabilities(id, dynamicModels?) → { models, efforts, permissionModes:[{value,label}] } for the
-// dropdowns. Claude's efforts/modes are the verbatim lists above; its model list is the aliases
-// merged with any CLI-discovered ids (dynamicModels, cached by the host). Codex supplies its own (S05).
-function capabilities(id, dynamicModels) {
+// capabilities(id, modelRows?) → { models, efforts, permissionModes:[{value,label}] } for the
+// dropdowns. Claude's efforts/modes are the verbatim lists above; its model list is built from the
+// CLI's cached supportedModels() rows (versioned labels), or the alias fallback. Codex's = its own (S05).
+function capabilities(id, modelRows) {
   if (id === 'codex') return require('./codex').codexCaps(); // gated: no auto/acceptEdits on an old CLI (P03-S02)
-  return { ...CLAUDE_CAPS, models: mergeClaudeModels(dynamicModels) };
+  return { ...CLAUDE_CAPS, models: claudeModels(modelRows) };
 }
 
-module.exports = { provider, capabilities, claudeModelValues, mergeClaudeModels, CLAUDE_CAPS };
+module.exports = { provider, capabilities, claudeModels, modelValues, CLAUDE_CAPS };

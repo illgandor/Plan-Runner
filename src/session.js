@@ -239,15 +239,47 @@ function supportedModels(id) { return supportedModelsByProject.get(id) || []; }
 // `session:models` sink event. Piggybacks on the runner/chat session we already started (no extra
 // probe). Any failure (old SDK without the method, thrown call, non-array) is swallowed — the
 // dropdown falls back to the stable aliases, so this can never break a run. (P10 model discovery)
+function toModelRows(infos) {
+  return (Array.isArray(infos) ? infos : [])
+    .map((m) => ({ value: m.value, resolvedModel: m.resolvedModel, displayName: m.displayName }))
+    .filter((m) => m.value);
+}
 function fetchSupportedModels(id, entry) {
   const q = entry && entry.q;
   if (!q || typeof q.supportedModels !== 'function') return;
   Promise.resolve().then(() => q.supportedModels()).then((infos) => {
-    if (entry.aborted || !Array.isArray(infos)) return;
-    const rows = infos.map((m) => ({ value: m.value, resolvedModel: m.resolvedModel })).filter((m) => m.value);
+    if (entry.aborted) return;
+    const rows = toModelRows(infos);
     supportedModelsByProject.set(id, rows);
     defaultSend('session:models', { id, models: rows });
   }).catch(() => { /* model-list discovery is best-effort — never surface as a chat error */ });
+}
+
+// Proactive one-shot catalog fetch, decoupled from chat: spin a throwaway plan-mode (read-only)
+// query, grab supportedModels() at init, tear it down. Lets the host SEED the versioned picker
+// before any real session runs. Best-effort → [] on any failure (no claude, old SDK, thrown call).
+// Interrupted right after init so no model turn completes (negligible cost). (P10 · resolved-version)
+async function fetchModels(cwd, options = {}) {
+  const claudePath = options.claudePath !== undefined ? options.claudePath : findClaude();
+  if (!claudePath) return [];
+  let q = null;
+  try {
+    const query = await getQuery();
+    const input = (async function* () { yield { type: 'user', message: { role: 'user', content: 'hi' } }; })();
+    q = query({ prompt: input, options: {
+      cwd, settingSources: ['project', 'user'], permissionMode: 'plan', pathToClaudeCodeExecutable: claudePath } });
+    for await (const m of q) {
+      if (m.type === 'system' && m.subtype === 'init') {
+        const infos = typeof q.supportedModels === 'function' ? await q.supportedModels() : [];
+        return toModelRows(infos);
+      }
+    }
+    return [];
+  } catch { return []; }
+  finally {
+    try { settle(q && q.interrupt && q.interrupt()); } catch { /* already ended */ }
+    try { settle(q && q.return && q.return()); } catch { /* already ended */ }
+  }
 }
 // First user-message uuid of the CURRENT live session per project — the SDK file-checkpoint
 // anchor ("step start"). rewindFiles(id, thisUuid) rolls the step's edits back to before its
@@ -346,4 +378,4 @@ function stop(id) {
 
 module.exports = { start, send, chat, stop, interrupt, currentSessionId, mcpStatus, mapMessage,
   setQuery, getQuery, sdkOptions, modeToPermission, resolvePermission, resolveDialog, setSink, defaultSend, sessions,
-  stepStartMessageId, rewindFiles, resolvedModel, supportedModels };
+  stepStartMessageId, rewindFiles, resolvedModel, supportedModels, fetchModels };
