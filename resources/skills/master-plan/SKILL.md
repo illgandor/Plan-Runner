@@ -54,6 +54,11 @@ State the detected mode before acting. All modes end with STEP 4.
    rulings on either/or choices found in the draft (resolve → Locked decision,
    park → Open decision that blocks its steps), and which actions are
    owner-only (accounts, payments, physical/device checks).
+4. **Ask: will one person drive this plan, or several?** (INIT and NEW-PLAN.)
+   Several → record it as a Locked decision, and write the §Shared-repo rules
+   block of CONVENTIONS.md (`references/templates.md` §6). It changes no step
+   spec — it sets the close-out discipline that keeps two drivers from
+   colliding. One person → say so in Facts; the section is omitted.
 
 ## STEP 2 — Decompose (INIT and NEW-PLAN)
 

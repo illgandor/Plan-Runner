@@ -27,15 +27,31 @@ const engine = require('./engine');
 // dirty or the branch is ahead, the session skipped/failed close-out; we must NOT advance
 // past stranded work (that's how P02-S05 got lost). Returns { clean, pushed }; a non-git repo
 // or no-upstream never blocks. Injected on the Runner so tests can stub it.
-function gitState(cwd) {
-  const git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+function gitState(cwd, { fetch = true } = {}) {
+  const git = (args, opts) => execFileSync('git', args,
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
   try {
     const clean = git(['status', '--porcelain']) === '';
-    let pushed = true;
-    try { pushed = git(['rev-list', '--count', '@{u}..HEAD']) === '0'; } catch { pushed = true; } // no upstream → n/a
-    return { clean, pushed };
-  } catch { return { clean: true, pushed: true }; } // not a git repo → don't block
+    // Refresh the remote-tracking ref so `behind` reflects the remote NOW, not whenever someone
+    // last fetched. Never prompt for credentials (an unattended run must not block on a password
+    // dialog) and never hang the extension host on a dead network — a failed fetch just falls
+    // through to the last-known upstream ref, which can only make us MISS staleness, never invent it.
+    if (fetch) {
+      try {
+        git(['fetch', '--quiet'],
+          { timeout: FETCH_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+      } catch { /* offline / no remote / auth needed → don't block the loop */ }
+    }
+    let pushed = true, behind = false;
+    try {
+      pushed = git(['rev-list', '--count', '@{u}..HEAD']) === '0';
+      behind = git(['rev-list', '--count', 'HEAD..@{u}']) !== '0';
+    } catch { pushed = true; behind = false; } // no upstream → n/a
+    return { clean, pushed, behind };
+  } catch { return { clean: true, pushed: true, behind: false }; } // not a git repo → don't block
 }
+
+const FETCH_TIMEOUT_MS = 20000; // a freshness fetch may not stall the loop on a bad network
 
 // Per-step run ledger (P05-S07, D-017): append one JSON line per completed step to
 // <cwd>/.plan-runner/runs.jsonl so "what did it do while I slept?" survives session teardown.
@@ -228,6 +244,15 @@ class Runner extends EventEmitter {
       return this._finish('idle', `Reached max steps per run (${max}) — restart to continue`);
     if (stopTimeReached(this._startedAtMs, this.now(), this.project.stopAtTime))
       return this._finish('idle', `Reached stop-at time (${this.project.stopAtTime}) — restart to continue`);
+    // Freshness guard: never start a step on a checkout that's behind its remote. On a project
+    // more than one person drives, the commits you're missing include their PROGRESS.md close-out,
+    // so the NEXT pointer below would be stale too — you'd redo a finished step or collide with it.
+    // Checked BEFORE readPointer for exactly that reason. No upstream / no remote / offline never
+    // blocks (gitState reports behind:false), so solo projects pay nothing.
+    if (this.gitCheck(this.project.path).behind) {
+      return this._finish('idle', 'Behind the remote — someone else pushed work this clone does not '
+        + 'have. Run `git pull --ff-only`, then Start again.');
+    }
     const next = readPointer(this.project.path);
     if (!next) return this._finish('error', 'No NEXT pointer / PROGRESS.md — not a master-plan project');
     if (/^none/i.test(next)) return this._finish('done', `Project complete (${next})`);

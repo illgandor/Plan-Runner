@@ -15,8 +15,8 @@ description: >
 metadata:
   origin: claude
   mirrored_from: next-step
-  source_sha: 1d3ccb67aea18593457e2a4896513a766639c0008b40df999423e508dbf0be7c
-  twin_sha: d5a713a04c6a12c9d6ef593d63c7f954cc014aa84a9b73f61dbf97383350e51d
+  source_sha: 5ffc1792225c59eb8372a629971324e9b8b23d6951808df5a42de5557bdf0327
+  twin_sha: c314da47dbe4220fd881d594b449f2df57af8b9b23285f816d07c6cbfc46db76
   synced: 2026-07-24
 ---
 
@@ -58,6 +58,10 @@ Run the gate named in the step's last Completion box (commands in
 of your job — you may not build on a red base.
 Also run `git status`; if the tree is dirty from a crashed session, finish-and-commit
 or reset that leftover work before implementing — never build on top of it.
+If CONVENTIONS.md has a §Shared-repo rules section, this repo has more than one
+driver: `git fetch` and STOP if the branch is behind its upstream. The commits you
+are missing include someone else's close-out, so STEP 1's pointer was stale and the
+step you just loaded may already be done. Tell the owner to `git pull --ff-only`.
 
 ## STEP 4 — Implement exactly that one step
 Satisfy every Completion-criteria box and the Verify command — no more, no less.

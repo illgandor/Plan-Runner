@@ -16,8 +16,8 @@ description: >
 metadata:
   origin: claude
   mirrored_from: master-plan
-  source_sha: 26314772a2bd90a90287a5ecdd7684738858a2a3d243cd3fe18e2270e44a194c
-  twin_sha: 02eaefbae6d7653fc1e77e61574fce56934ee0440dc68f56de79364e713eccc3
+  source_sha: 7c932bd889bde65913ad9cbe0b0d45b9457211bb9837f5276080c7b06b8b2971
+  twin_sha: b38557850671e27b312676dd713566e74b802e8caf02fb2cefc9b43791c52b53
   synced: 2026-07-24
 ---
 
@@ -60,6 +60,11 @@ State the detected mode before acting. All modes end with STEP 4.
    rulings on either/or choices found in the draft (resolve → Locked decision,
    park → Open decision that blocks its steps), and which actions are
    owner-only (accounts, payments, physical/device checks).
+4. **Ask: will one person drive this plan, or several?** (INIT and NEW-PLAN.)
+   Several → record it as a Locked decision, and write the §Shared-repo rules
+   block of CONVENTIONS.md (`references/templates.md` §6). It changes no step
+   spec — it sets the close-out discipline that keeps two drivers from
+   colliding. One person → say so in Facts; the section is omitted.
 
 ## STEP 2 — Decompose (INIT and NEW-PLAN)
 

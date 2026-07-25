@@ -319,11 +319,26 @@ machine path there cannot be corrected in a clone without breaking the hash for
 everyone else, so it is unfixable by construction. Say "the repo root" or "the
 folder holding PROGRESS.md", never the path you happen to be sitting in.
 
-## Concurrency — one driver at a time
-PROGRESS.md is single-writer by design: session IDs are sequential, and ▶ NEXT
-STEP is one cursor into a linear plan. Two people closing steps in parallel
-collide on those lines and the pointer cannot be merged. Parallel work goes on a
-branch and closes out serially.
+## Shared-repo rules  {{INCLUDE ONLY IF several people drive this plan — STEP 1.4}}
+PROGRESS.md is single-writer by design: session IDs are sequential and ▶ NEXT
+STEP is one cursor into a linear plan. There is no correct merge of "next is S07"
+and "next is S08", so the pointer cannot be reconciled after the fact — it has to
+be avoided.
+
+1. **Pull before you start.** `git pull --ff-only` on the plan's branch. Starting
+   a step on a checkout that is behind means the missing commits include someone
+   else's close-out, so your NEXT pointer is already wrong. (Plan Runner enforces
+   this and refuses to start; do it by hand when running the skill directly.)
+2. **One driver at a time per plan.** Whoever starts a step owns the pointer
+   until they close out and push. Parallel work goes on a branch and closes out
+   serially.
+3. **Close out completely, then push.** A step that is committed but unpushed is
+   invisible to everyone else and reads as available work.
+4. **Session IDs are claimed at close-out, not at start** — take the next free
+   S-number when you write the entry, so two people who started together don't
+   both claim the same one.
+5. **Never rewrite shared history.** No force-push, no rebasing pushed commits: a
+   LOCKED plan's hash and the board's recorded shas both point into it.
 
 ## Session protocol (summary — the full text is SESSION_PROMPT.md, linked not copied)
 One step per session · verify green first · deviations are Amendments ·

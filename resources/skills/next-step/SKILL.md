@@ -52,6 +52,10 @@ Run the gate named in the step's last Completion box (commands in
 of your job — you may not build on a red base.
 Also run `git status`; if the tree is dirty from a crashed session, finish-and-commit
 or reset that leftover work before implementing — never build on top of it.
+If CONVENTIONS.md has a §Shared-repo rules section, this repo has more than one
+driver: `git fetch` and STOP if the branch is behind its upstream. The commits you
+are missing include someone else's close-out, so STEP 1's pointer was stale and the
+step you just loaded may already be done. Tell the owner to `git pull --ff-only`.
 
 ## STEP 4 — Implement exactly that one step
 Satisfy every Completion-criteria box and the Verify command — no more, no less.
