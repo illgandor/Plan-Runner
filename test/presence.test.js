@@ -4,7 +4,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const http = require('http');
-const { heartbeat, peers, displayName, TIMEOUT_MS } = require('../src/presence');
+const fs = require('fs');
+const { heartbeat, peers, displayName, startPresence, TIMEOUT_MS, RUNNING_MS, IDLE_MS } = require('../src/presence');
 
 // projectId + `git config user.name` both go through exec; stub it so tests never depend on git.
 const exec = (_cmd, args) =>
@@ -93,6 +94,73 @@ test('a 200 with garbage instead of {peers:[...]} is null, not a throw', async (
   const { server, url } = await serve((_rq, rs) =>
     rs.writeHead(200, { 'content-type': 'application/json' }).end('not json at all'));
   try { assert.strictEqual(await peers(opts(url)), null); } finally { server.close(); }
+});
+
+// ---- The cadence loop (P10-S05) ----
+// A fake clock + a recording client: no sockets, no real timers. `calls` is every request the loop
+// would have made, so "no presence call on any code path" is an assertion, not a hope.
+function loop(extra = {}) {
+  const calls = [];
+  const timers = [];
+  const client = {
+    heartbeat: (body) => { calls.push({ fn: 'heartbeat', ...body }); return Promise.resolve(true); },
+    peers: () => { calls.push({ fn: 'peers' }); return Promise.resolve([]); },
+  };
+  const l = startPresence({
+    settings: { url: 'http://pi:8787', token: 'abc', name: 'Tyler' }, cwd: '.', exec, client,
+    setTimer: (fn, ms) => { const t = { fn, ms, live: true }; timers.push(t); return t; },
+    clearTimer: (t) => { t.live = false; },
+    ...extra,
+  });
+  return { l, calls, timers, live: () => timers.filter((t) => t.live) };
+}
+
+test('the cadence follows D-043: 60s running, 300s idle-visible, no timer when hidden', () => {
+  const { l, calls, live } = loop();
+  l.update({ visible: true, state: 'idle', step: null });
+  assert.deepStrictEqual(live().map((t) => t.ms), [IDLE_MS]);
+  assert.deepStrictEqual(calls.map((c) => c.fn), ['heartbeat', 'peers'], 'a transition reports now, not one interval late');
+  assert.deepStrictEqual([calls[0].state, calls[0].step], ['idle', null]);
+
+  l.update({ visible: true, state: 'running', step: 'P10-S05' });
+  assert.deepStrictEqual(live().map((t) => t.ms), [RUNNING_MS], 'the idle timer was cleared, not left running');
+  assert.deepStrictEqual([calls[2].state, calls[2].step], ['running', 'P10-S05']);
+
+  l.update({ visible: true, state: 'running', step: 'P10-S05' });
+  assert.strictEqual(calls.length, 4, 'an unchanged state does not re-arm or re-send');
+  l.update({ visible: true, state: 'running', step: 'P10-S06' });
+  assert.strictEqual(calls[4].step, 'P10-S06', 'a new step heartbeats immediately at the same cadence');
+
+  l.update({ visible: false, state: 'running', step: 'P10-S06' });
+  assert.deepStrictEqual(live(), [], 'hiding the panel stops every timer');
+  l.stop();
+  assert.deepStrictEqual(live(), []);
+});
+
+test('unconfigured presence opens no timer and makes no call on any path (D-039)', () => {
+  const noRemote = () => { throw new Error('fatal: No such remote'); };
+  for (const extra of [{ settings: { url: '', token: '' } }, { exec: noRemote }]) {
+    const { l, calls, live } = loop(extra);
+    for (const state of ['idle', 'running']) l.update({ visible: true, state, step: 'P10-S05' });
+    assert.deepStrictEqual(live(), [], 'no timer');
+    assert.deepStrictEqual(calls, [], 'no request');
+  }
+});
+
+test('a presence client that always rejects never reaches the caller', async () => {
+  const reject = () => Promise.reject(new Error('server on fire'));
+  const { l, live } = loop({ client: { heartbeat: reject, peers: reject },
+    onPeers: () => { throw new Error('onPeers must not run on a failed poll'); } });
+  assert.doesNotThrow(() => l.update({ visible: true, state: 'running', step: 'P10-S05' }));
+  assert.strictEqual(live().length, 1, 'a rejecting server does not kill the cadence');
+  await new Promise(setImmediate); // let the rejections settle — an unhandled one fails the run
+  l.stop();
+});
+
+// The architectural rule of P10-S05, locked: the heartbeat rides extension.js's runner EVENTS, so
+// the runner's own step path gains no presence call and cannot be delayed by one (D-038).
+test('runner.js contains no presence call', () => {
+  assert.ok(!/presence/i.test(fs.readFileSync(require.resolve('../src/runner.js'), 'utf8')));
 });
 
 test('the display name follows the §Presence precedence and the timeout obeys the contract', () => {

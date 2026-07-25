@@ -70,4 +70,43 @@ async function peers(opts = {}) {
   } catch { return null; }
 }
 
-module.exports = { heartbeat, peers, displayName, TIMEOUT_MS };
+// ---- The cadence loop (P10-S05, D-043) ----
+// One interval; each tick fires a heartbeat AND a peers poll, both fire-and-forget. Nothing here is
+// ever awaited by a runner path, so a dead or slow server can never block, delay or fail a step
+// (D-038). extension.js drives update() off runner EVENTS — runner.js gains no presence call at all.
+const RUNNING_MS = 60000; // a step is live in this panel
+const IDLE_MS = 300000;   // panel visible, no live run
+
+function startPresence(opts = {}) {
+  const setTimer = opts.setTimer || setInterval;
+  const clearTimer = opts.clearTimer || clearInterval;
+  const onPeers = opts.onPeers || (() => {});
+  const client = opts.client || { heartbeat, peers };
+  let timer = null, last = null, ok = null, cur = { state: 'idle', step: null };
+
+  const tick = () => {
+    Promise.resolve(client.heartbeat(cur, opts)).catch(() => {});
+    Promise.resolve(client.peers(opts)).then(onPeers, () => {});
+  };
+  function stop() { if (timer) clearTimer(timer); timer = null; last = null; }
+  // Hidden panel, no config or no git remote → no timer and no request at all (D-039). ready() is
+  // one git exec, so it is resolved once per loop; a settings edit disposes the loop instead.
+  function update({ visible, state, step } = {}) {
+    if (ok === null) ok = !!ready(opts);
+    if (!ok) return;
+    const st = state === 'running' ? 'running' : 'idle';
+    const ms = visible ? (st === 'running' ? RUNNING_MS : IDLE_MS) : 0;
+    const key = `${ms}|${st}|${step || ''}`;
+    if (key === last) return; // same cadence AND same step → let the running timer be
+    last = key;
+    if (timer) clearTimer(timer);
+    timer = null;
+    if (!ms) return;
+    cur = { state: st, step: step || null };
+    timer = setTimer(tick, ms);
+    tick(); // report the transition now, not one interval late
+  }
+  return { update, stop };
+}
+
+module.exports = { heartbeat, peers, displayName, startPresence, TIMEOUT_MS, RUNNING_MS, IDLE_MS };

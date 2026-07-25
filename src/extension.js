@@ -13,6 +13,7 @@ const { isMasterPlan, readPointer, readPlanFraction } = require('./progress');
 const skills = require('./skills');
 const updater = require('./updater');
 const { UsageService } = require('./usage');
+const { startPresence } = require('./presence');
 
 // Capability lists live in engine.js (single source of truth). caps() gives the SELECTED
 // engine's models/efforts/permissionModes so the dropdowns and validation re-skin per engine.
@@ -106,6 +107,24 @@ let runningStep = null; // id shown in the status bar while a step is in flight 
 let lastNotify = null;  // dedupe key so a repeated transition doesn't re-fire an OS notification
 let state = { enabled: false, engine: 'claude', model: '(default)', effort: '(default)', mode: 'auto' };
 let skillNote = null;   // one-line result of the on-activate skill install, shown in the panel
+let presence = null;    // the presence cadence loop (P10-S05); null until something calls syncPresence()
+
+// P10-S05: presence rides runner EVENTS, never the runner's step path — a dead server can't delay a
+// step (D-038). runningStep is the same "is a step live here" the status bar uses. The loop itself
+// stays dark (no timer, no request) when unconfigured or when there's no git remote (D-039).
+function syncPresence() {
+  const p = project();
+  if (!p) return presence && presence.stop();
+  if (!presence) {
+    const c = vscode.workspace.getConfiguration('planRunner');
+    presence = startPresence({
+      settings: { url: c.get('presenceUrl', ''), token: c.get('presenceToken', ''), name: c.get('presenceName', '') },
+      cwd: p.path,
+      onPeers: (peers) => post({ kind: 'presence', peers }), // S06 renders it; the token never goes to the webview
+    });
+  }
+  presence.update({ visible: !!(view && view.visible), state: runningStep ? 'running' : 'idle', step: runningStep });
+}
 
 // One OS notification per transition (needs-you/paused warn, done info). Dedupe on `key` so a
 // repeated status doesn't spam; going active again (running/finalizing/resumed) clears the key.
@@ -198,12 +217,14 @@ function ensureRunner() {
     if (s.state === 'running' || s.state === 'finalizing') lastNotify = null; // active again → re-arm notifications
     else if (s.state === 'needs-you') notify('needs-you:' + s.step, 'warn', `Plan Runner: ${s.detail || s.step + ' needs you'}`);
     updateStatusBar();
+    syncPresence(); // new step / new state → heartbeat it (fire-and-forget, never awaited)
   });
   runner.on('step-started', (s) => post({ kind: 'step-started', ...s }));
   runner.on('step-done', (d) => { post({ kind: 'step-done', ...d }); updateStatusBar(); }); // PROGRESS.md advanced → refresh fraction
   runner.on('done', (d) => {
     post({ kind: 'done', ...d });
     runningStep = null; updateStatusBar();
+    syncPresence(); // run over → drop back to the idle cadence
     postDigest(d.startedAtMs); // P09-S16: one "what did it do while I slept?" block at run end
     if (d.state === 'done') notify('done', 'info', `Plan Runner: ${d.detail || 'run complete'}`);
     else if (d.state === 'error') notify('error', 'warn', `Plan Runner: ${d.detail || 'run errored'}`);
@@ -434,7 +455,10 @@ class ChatViewProvider {
       post(evt);
     });
     v.webview.onDidReceiveMessage(onMessage);
-    v.onDidDispose(() => { view = null; }); // don't post() into a torn-down webview
+    // Presence timers exist only while the panel is visible (D-043): hiding it stops them.
+    v.onDidChangeVisibility(syncPresence);
+    syncPresence();
+    v.onDidDispose(() => { view = null; presence?.stop(); }); // don't post() into a torn-down webview
   }
 }
 
@@ -523,10 +547,14 @@ function activate(context) {
       if (e.affectsConfiguration('planRunner.stallNotifySeconds') && runner)
         runner.stallMs = vscode.workspace.getConfiguration('planRunner').get('stallNotifySeconds', 0) * 1000;
       if (e.affectsConfiguration('planRunner.autoSkipQuestionSeconds')) sendConfig(); // re-post so the webview picks up the new value
+      // Presence settings are read once per loop — dispose it so the edit takes effect without a reload.
+      if (['presenceUrl', 'presenceToken', 'presenceName'].some((k) => e.affectsConfiguration('planRunner.' + k))) {
+        presence?.stop(); presence = null; syncPresence();
+      }
     }),
   );
 }
 
-function deactivate() { runner?.abort(); usage?.stop(); } // shutdown = immediate teardown
+function deactivate() { runner?.abort(); usage?.stop(); presence?.stop(); } // shutdown = immediate teardown
 
 module.exports = { activate, deactivate };
