@@ -1,0 +1,15 @@
+{
+  "name": "plan-runner-presence-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Advisory who-is-on-this-project server for Plan Runner. Node stdlib only, no dependencies, no database.",
+  "license": "Apache-2.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"*.test.js\""
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
