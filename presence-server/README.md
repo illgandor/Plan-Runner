@@ -2,7 +2,8 @@
 
 A tiny advisory service that answers one question: **who else is working on this project right
 now?** Plan Runner panels heartbeat to it while they are open, and each panel shows the other
-people it sees. Node stdlib only — no dependencies, no database, no build step.
+people it sees. Opening the server's own URL in a browser gives you a dashboard of every
+project it has heard about. Node stdlib only — no dependencies, no database, no build step.
 
 It is a separate package from the extension. It is never bundled into the `.vsix`, and Plan
 Runner does not need it: with no server configured, presence is simply dark.
@@ -11,9 +12,10 @@ Runner does not need it: with no server configured, presence is simply dark.
 
 - **No locking.** It will not stop two people running the same step. It tells you someone is
   there; deciding what to do about that is yours.
-- **No dashboard, no history, no accounts.** Two endpoints, one shared token, no UI.
-- **No persistence.** State lives in memory. A restart forgets everyone, and everyone
-  re-appears on their next heartbeat (within ~5 minutes).
+- **No accounts.** One shared token for everybody. There is no per-person login to revoke.
+- **No live persistence.** *Who is on right now* lives in memory. A restart forgets everyone,
+  and everyone re-appears on their next heartbeat (within ~5 minutes). Only the last-seen
+  history is written to disk, and it is never consulted to decide who is live.
 - **No identity guarantees.** Anyone holding the token can claim any display name.
 
 ## Requirements
@@ -48,6 +50,40 @@ PRESENCE_TOKEN=... node server.js          # foreground, for a quick try
 The server **refuses to start with no `PRESENCE_TOKEN`** and exits non-zero saying so. That is
 on purpose — an unauthenticated presence server is an open write endpoint.
 
+## The dashboard
+
+Open the server's base URL in a browser — `http://your-host:8787/` — and you get a page listing
+every project the server has heard about, who is on it right now, and when everyone else was
+last seen. It asks for the token once, keeps it in `localStorage`, and refreshes every 30
+seconds. It defaults to the last 30 days with a **Show all** toggle, and puts projects more than
+one person reports at the top. "Forget token" clears it from the browser.
+
+Two things to be clear-eyed about before you hand anyone that URL:
+
+- **The token is the whole boundary.** Anyone who has it sees *every* repo name anyone has ever
+  reported to this server, plus who worked on what and when — not just the projects they share
+  with you. If that list is sensitive, run a second server rather than sharing this token.
+- **Last-seen always under-reports.** Panels heartbeat only while the Plan Runner panel is
+  *visible*. Work done with the panel closed, in another editor, or on a machine with presence
+  unconfigured leaves no trace at all. An empty or stale row means "no evidence here", never
+  "nobody worked on it" — do not use this page to check up on anyone.
+
+## The state file
+
+Last-seen history is the one thing that survives a restart. It is written to `PRESENCE_STATE`,
+defaulting to `presence-state.json` beside `server.js`:
+
+- Point it somewhere the service user can write. The systemd unit sets it to
+  `%S/plan-runner/presence-state.json` — `/var/lib/plan-runner/` for a system unit,
+  `~/.local/state/plan-runner/` for a `--user` one — and systemd creates the directory.
+- **Don't bother backing it up.** It is advisory, it rebuilds itself as people work, and losing
+  it costs you nothing but old rows. A missing, unreadable, or corrupt file starts empty and
+  never stops the server from booting.
+- It is capped at 500 rows, oldest last-seen evicted first. Nothing is ever deleted by age, so a
+  long-idle project stays listed until the cap pushes it out.
+- Writes are debounced and atomic (temp file + rename), so a power cut can't truncate it.
+- Delete the file to wipe history. The live "who is on now" map isn't in there at all.
+
 ### Run it as a service (Linux / Raspberry Pi)
 
 ```sh
@@ -58,7 +94,14 @@ systemctl status plan-runner-presence
 ```
 
 Edit `User=`, `WorkingDirectory=`, and `EnvironmentFile=` in the unit first if you did not
-clone to `/home/pi/Plan-Runner`. The unit restarts on failure and loads `.env` for you.
+clone to `/home/pi/Plan-Runner`. The unit restarts on failure, loads `.env` for you, and
+declares its own `StateDirectory=`, so there is no directory to create by hand.
+
+If `node` comes from nvm, a system unit won't find it — run it as a **`--user`** unit instead:
+drop the `User=` line, copy the file to `~/.config/systemd/user/`, then
+`systemctl --user enable --now plan-runner-presence` and `sudo loginctl enable-linger $USER`
+so it starts at boot without you logging in. `%S` follows you: state lands in
+`~/.local/state/plan-runner/`.
 
 ## Point Plan Runner at it
 
@@ -84,6 +127,12 @@ Exposing this server directly to the internet — port forwarding, a public IP �
 **unsupported**. It speaks plain HTTP, so the bearer token crosses the wire in the clear, and
 its only defense is that one shared token. If you insist, terminate TLS at a reverse proxy in
 front of it and accept that you are on your own.
+
+The dashboard makes this worse, not better. A URL that renders a readable page in any browser
+is far more tempting to "just put behind a domain" than two JSON endpoints ever were, and `GET
+/` is deliberately unauthenticated (a browser cannot send a bearer header for its own document
+load). Anyone who reaches the port gets the page; the data behind it is one guessed or leaked
+token away. Keep the port on the private network.
 
 ## Troubleshooting
 
@@ -114,9 +163,13 @@ Runs the server on an ephemeral port and exercises the real HTTP surface.
 
 ## Protocol
 
-Frozen in `planning/reference/CONTRACTS.md` §Presence (local to the maintainer's checkout).
-Two routes, both requiring `Authorization: Bearer <token>`:
+Frozen in `planning/reference/CONTRACTS.md` §Presence and §Dashboard (local to the maintainer's
+checkout). Every DATA route requires `Authorization: Bearer <token>`:
 
 - `POST /heartbeat` — `{project, user, step, state, ts}` → `204`. Malformed → `400`.
 - `GET /presence/:project` → `200 {peers:[{user, step, state, ts}]}`. Unknown project is `[]`,
   never a `404`. Peers unseen for 900s are dropped. Callers filter themselves out by `user`.
+- `GET /projects` → `200 {projects:[{project, reporters, peers:[…], people:[…]}]}`. `peers` is
+  live under the same 900s rule; `people` is the history rows. Nothing known is `{projects: []}`.
+- `GET /` — the dashboard page, `text/html`, **unauthenticated**, the one exemption. It carries
+  no data of its own; everything on it is fetched from `/projects` with the token.

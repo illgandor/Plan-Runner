@@ -2,6 +2,9 @@
 ; Install:  sudo cp plan-runner-presence.service /etc/systemd/system/
 ;           sudo systemctl daemon-reload && sudo systemctl enable --now plan-runner-presence
 ; Edit User/WorkingDirectory/EnvironmentFile below to match where you cloned it.
+; As a --user unit instead (needed when node comes from nvm): drop User=, copy to
+; ~/.config/systemd/user/, `systemctl --user enable --now`, and `loginctl enable-linger`.
+; %S resolves per mode: /var/lib for a system unit, ~/.local/state for a --user one.
 [Unit]
 Description=Plan Runner presence server (advisory who-is-on-this-project)
 After=network-online.target
@@ -12,14 +15,20 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/Plan-Runner/presence-server
 EnvironmentFile=/home/pi/Plan-Runner/presence-server/.env
+; systemd creates this directory; declared AFTER EnvironmentFile so it wins over a blank
+; PRESENCE_STATE= line in .env. Missing file on first boot is fine — history starts empty.
+StateDirectory=plan-runner
+Environment=PRESENCE_STATE=%S/plan-runner/presence-state.json
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=5
-; State is in-memory by design (D-046), so a restart simply forgets everyone. No data to protect.
+; LIVE presence is in-memory by design (D-047) — a restart forgets who is on. Only the
+; last-seen HISTORY is on disk (D-048): advisory, regenerates itself, not worth backing up.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=%S/plan-runner
 
 [Install]
 WantedBy=multi-user.target
