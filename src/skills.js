@@ -13,12 +13,18 @@ const REQUIRED = ['master-plan', 'next-step']; // next-step runs each step; mast
 // One entry per engine. src = the bundled twin dir; root = where that engine reads skills.
 // Honor each engine's own home override (CLAUDE_CONFIG_DIR / CODEX_HOME) so skills land
 // where the user's CLI actually looks.
+// `backups` MUST sit outside `root`: both CLIs treat every dir under skills/ that has a
+// SKILL.md as a skill, so a <name>.bak parked in there registers as a second, stale copy
+// of the skill it was backing up.
 function platforms() {
+  const home = (v, d) => process.env[v] || path.join(os.homedir(), d);
   return [
     { engine: 'claude', src: resources('skills'),
-      root: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills') },
+      root: path.join(home('CLAUDE_CONFIG_DIR', '.claude'), 'skills'),
+      backups: path.join(home('CLAUDE_CONFIG_DIR', '.claude'), 'plan-runner-skill-backups') },
     { engine: 'codex', src: resources('skills-codex'),
-      root: path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'skills') },
+      root: path.join(home('CODEX_HOME', '.codex'), 'skills'),
+      backups: path.join(home('CODEX_HOME', '.codex'), 'plan-runner-skill-backups') },
   ];
 }
 
@@ -38,9 +44,10 @@ function status() {
 
 // Copy each bundled skill into every engine's skill dir. force=true overwrites (for
 // updating); otherwise an existing skill is kept untouched.
-// A forced overwrite moves the old copy to <name>.bak first — skill dirs live outside
-// any repo, so without that a local edit would be unrecoverable. If the backup can't
-// be taken we KEEP the existing copy rather than clobber it unbacked.
+// A forced overwrite parks the old copy in <engine home>/plan-runner-skill-backups/<name>
+// first — skill dirs live outside any repo, so without that a local edit would be
+// unrecoverable. If the backup can't be taken we KEEP the existing copy rather than
+// clobber it unbacked.
 function install({ force = false } = {}) {
   const results = [];
   for (const p of platforms()) {
@@ -51,9 +58,11 @@ function install({ force = false } = {}) {
       const exists = fs.existsSync(path.join(to, 'SKILL.md'));
       if (exists && !force) { results.push({ engine: p.engine, name, action: 'kept' }); continue; }
       if (exists) {
+        const bak = path.join(p.backups, name);
         try {
-          fs.rmSync(`${to}.bak`, { recursive: true, force: true }); // one slot, newest wins
-          fs.renameSync(to, `${to}.bak`);                           // also clears files the bundle dropped
+          fs.mkdirSync(p.backups, { recursive: true });
+          fs.rmSync(bak, { recursive: true, force: true }); // one slot per skill, newest wins
+          fs.renameSync(to, bak);                           // also clears files the bundle dropped
         } catch (e) {
           results.push({ engine: p.engine, name, action: 'backup-failed' });
           continue; // keep what's on disk — an un-backed-up overwrite is worse than a stale skill

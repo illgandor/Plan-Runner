@@ -56,18 +56,24 @@ test('install-if-missing keeps an existing copy; force overwrites', () => {
   });
 });
 
-test('a forced overwrite parks the previous copy in <name>.bak (skill dirs are not in git)', () => {
+test('a forced overwrite backs the previous copy up OUTSIDE skills/ (skill dirs are not in git)', () => {
   withHomes((claude) => {
     skills.install();
     const dir = path.join(claude, 'skills', 'next-step');
     fs.writeFileSync(path.join(dir, 'SKILL.md'), 'HAND-EDITED');
     fs.writeFileSync(path.join(dir, 'scratch.md'), 'local note');   // a file the bundle lacks
     skills.install({ force: true });
+    const bak = path.join(claude, 'plan-runner-skill-backups', 'next-step');
     assert.notStrictEqual(fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8'), 'HAND-EDITED');
-    assert.strictEqual(fs.readFileSync(path.join(`${dir}.bak`, 'SKILL.md'), 'utf8'), 'HAND-EDITED',
+    assert.strictEqual(fs.readFileSync(path.join(bak, 'SKILL.md'), 'utf8'), 'HAND-EDITED',
       'the overwritten copy must be recoverable');
-    assert.ok(fs.existsSync(path.join(`${dir}.bak`, 'scratch.md')), 'backup keeps unbundled files too');
+    assert.ok(fs.existsSync(path.join(bak, 'scratch.md')), 'backup keeps unbundled files too');
     assert.ok(!fs.existsSync(path.join(dir, 'scratch.md')), 'a forced install is a clean replace');
+    // the bug this guards: anything with a SKILL.md under skills/ registers AS a skill,
+    // so a backup parked there shows up as a second, stale copy of the skill.
+    const stray = fs.readdirSync(path.join(claude, 'skills'))
+      .filter((d) => !skills.REQUIRED.includes(d));
+    assert.deepStrictEqual(stray, [], `no extra dirs may appear under skills/: ${stray}`);
   });
 });
 
