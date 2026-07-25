@@ -40,11 +40,15 @@ function gitState(cwd) {
 // Per-step run ledger (P05-S07, D-017): append one JSON line per completed step to
 // <cwd>/.plan-runner/runs.jsonl so "what did it do while I slept?" survives session teardown.
 // Best-effort — a write failure is swallowed and never blocks or delays the loop. Exported
-// for the runner method + tests. `.plan-runner/` is git-ignored.
+// for the runner method + tests. The dir self-ignores (see below), so it never dirties the tree.
 function appendLedger(cwd, record) {
   try {
     const dir = path.join(cwd, '.plan-runner');
     fs.mkdirSync(dir, { recursive: true });
+    // Self-ignoring dir: keeps the ledger out of `git status` without editing the
+    // project's own .gitignore. A dirty tree at step start now stops next-step's
+    // crash-recovery guard, so scratch logs must never be what dirties it.
+    if (!fs.existsSync(path.join(dir, '.gitignore'))) fs.writeFileSync(path.join(dir, '.gitignore'), '*\n');
     fs.appendFileSync(path.join(dir, 'runs.jsonl'), JSON.stringify(record) + '\n');
   } catch { /* best-effort: a ledger write never affects the run */ }
 }
