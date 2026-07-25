@@ -87,6 +87,24 @@
           "maximum": 3600,
           "scope": "application",
           "description": "Optional auto-skip for question cards (AskUserQuestion only, never permissions). When >0, an unattended question card shows a countdown and auto-Skips at zero so overnight runs never strand on a question. Any interaction with the card cancels the countdown. 0 = off (default)."
+        },
+        "planRunner.presenceUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Optional presence server base URL (e.g. http://raspberrypi.local:8787) for the advisory \"who else is working on this project\" light. Needs presenceToken set too. Empty = off (default); presence is entirely dark when off."
+        },
+        "planRunner.presenceToken": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Shared Bearer token for the optional presence server (one token per deployment). Needs presenceUrl set too. Empty = off (default)."
+        },
+        "planRunner.presenceName": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Display name shown to your presence peers. Empty = fall back to your git user.name, else \"someone\". Never send an email address."
         }
       }
     },

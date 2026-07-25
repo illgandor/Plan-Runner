@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { projectId, normalizeRemote } = require('../src/presence-id');
+const { projectId, normalizeRemote, presenceConfig } = require('../src/presence-id');
 
 test('SSH and HTTPS forms of the same remote yield the same id', () => {
   const id = 'github.com/illgandor/plan-runner';
@@ -44,4 +44,21 @@ test('projectId returns null when git itself fails', () => {
 test('projectId normalizes what git prints, newline and all', () => {
   const exec = () => 'git@github.com:illgandor/Plan-Runner.git\n';
   assert.strictEqual(projectId('.', { exec }), 'github.com/illgandor/plan-runner');
+});
+
+// P10-S03: the on/off switch. Dark unless BOTH url and token are set (D-039) — this is the guard
+// every later presence step gates on, so a regression here would silently turn presence ON.
+test('presenceConfig is null unless BOTH url and token are set', () => {
+  assert.strictEqual(presenceConfig(), null, 'unset (all three defaults) = dark');
+  assert.strictEqual(presenceConfig({ url: '', token: '', name: '' }), null);
+  assert.strictEqual(presenceConfig({ url: 'http://pi:8787' }), null, 'url alone = dark');
+  assert.strictEqual(presenceConfig({ token: 'abc' }), null, 'token alone = dark');
+  assert.strictEqual(presenceConfig({ url: '  ', token: ' ' }), null, 'whitespace is not a value');
+});
+
+test('presenceConfig trims and drops a trailing slash so URLs join cleanly', () => {
+  assert.deepStrictEqual(presenceConfig({ url: ' http://pi:8787// ', token: ' abc ', name: ' Tyler ' }),
+    { url: 'http://pi:8787', token: 'abc', name: 'Tyler' });
+  assert.deepStrictEqual(presenceConfig({ url: 'http://pi:8787', token: 'abc' }),
+    { url: 'http://pi:8787', token: 'abc', name: '' }, 'name is optional (§Presence D-042 fallback)');
 });

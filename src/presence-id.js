@@ -23,4 +23,14 @@ function projectId(cwd, { exec = execFileSync } = {}) {
   } catch { return null; }
 }
 
-module.exports = { projectId, normalizeRemote };
+// The single on/off switch every later presence step gates on (P10-S03, D-039): dark unless BOTH
+// url and token are configured. Pure — the caller reads the three planRunner.presence* settings
+// (extension.js from vscode config) and passes them in, so this module stays vscode-free.
+function presenceConfig(settings = {}) {
+  const url = String(settings.url || '').trim().replace(/\/+$/, '');
+  const token = String(settings.token || '').trim();
+  if (!url || !token) return null;
+  return { url, token, name: String(settings.name || '').trim() };
+}
+
+module.exports = { projectId, normalizeRemote, presenceConfig };
