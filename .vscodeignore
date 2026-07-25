@@ -2,6 +2,10 @@
 # 249MB per-platform claude binary is EXCLUDED (P06-S10 / D-019): claude-path.js resolves the
 # user's installed `claude` from PATH, so the bundle need not ship (~88MB -> ~1MB .vsix).
 node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe
+# THIS repo's own run ledger (step ids, timings, token counts, dollar costs). It is gitignored,
+# which is why it went unnoticed — but vsce packs from the working tree, so every published
+# .vsix through v0.2.12 shipped it. Local run data never belongs in a release artifact.
+.plan-runner/
 .gitignore
 .vscode/**
 PLAN.md

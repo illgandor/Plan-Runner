@@ -21,7 +21,12 @@ function displayName(name, cwd, exec) {
 }
 
 // The single gate both calls run through: null here means "stay dark" and no request happens.
-function ready({ settings, cwd = process.cwd(), exec = execFileSync } = {}) {
+// `opts.ctx` short-circuits it: resolving identity costs two SYNCHRONOUS git spawns, and this
+// runs on the extension host's only thread — the cadence loop resolves it once and hands it back
+// here so a tick costs zero git calls instead of four. A settings edit disposes the loop, so the
+// cached value can never outlive the config it was built from.
+function ready({ settings, cwd = process.cwd(), exec = execFileSync, ctx } = {}) {
+  if (ctx) return ctx;
   const cfg = presenceConfig(settings);
   if (!cfg) return null;
   const project = projectId(cwd, { exec });
@@ -83,16 +88,21 @@ function startPresence(opts = {}) {
   const onPeers = opts.onPeers || (() => {});
   const client = opts.client || { heartbeat, peers };
   let timer = null, last = null, ok = null, cur = { state: 'idle', step: null };
+  let opt = opts; // opts + the resolved identity, so a tick spawns no git at all
 
   const tick = () => {
-    Promise.resolve(client.heartbeat(cur, opts)).catch(() => {});
-    Promise.resolve(client.peers(opts)).then(onPeers, () => {});
+    Promise.resolve(client.heartbeat(cur, opt)).catch(() => {});
+    Promise.resolve(client.peers(opt)).then(onPeers, () => {});
   };
   function stop() { if (timer) clearTimer(timer); timer = null; last = null; }
   // Hidden panel, no config or no git remote → no timer and no request at all (D-039). ready() is
-  // one git exec, so it is resolved once per loop; a settings edit disposes the loop instead.
+  // two git execs, so it is resolved once per loop; a settings edit disposes the loop instead.
   function update({ visible, state, step } = {}) {
-    if (ok === null) ok = !!ready(opts);
+    if (ok === null) {
+      const ctx = ready(opts);
+      ok = !!ctx;
+      if (ctx) opt = { ...opts, ctx };
+    }
     if (!ok) return;
     const st = state === 'running' ? 'running' : 'idle';
     const ms = visible ? (st === 'running' ? RUNNING_MS : IDLE_MS) : 0;

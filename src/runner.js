@@ -461,7 +461,10 @@ class Runner extends EventEmitter {
     // Handoff guard: never advance past a step whose work isn't committed + pushed. The
     // session is kept ALIVE so you (or a reply) can tell it to finish close-out, after which
     // the turn ends, the pointer is still advanced, and we settle → re-check → advance.
-    const g = this.gitCheck(this.project.path);
+    // fetch:false — `clean` and `pushed` are both LOCAL questions, and gitState's fetch is a
+    // synchronous network call that would freeze the extension host for up to 20s at every step
+    // boundary for nothing. Staleness is checked in _runNext, where it actually matters.
+    const g = this.gitCheck(this.project.path, { fetch: false });
     if (!g.clean || !g.pushed) {
       this.needsYou = true;
       const why = !g.clean ? 'uncommitted changes — the step never committed its work'

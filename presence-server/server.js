@@ -42,42 +42,48 @@ function createServer({ token, now = Date.now } = {}) {
   const projects = new Map(); // project -> Map(user -> {user, step, state, ts})
 
   return http.createServer(async (req, res) => {
+    // Writing to a socket we already tore down (the over-long-body path destroys it) throws, and
+    // a throw inside an async handler is an unhandled rejection — which ends the process. One
+    // guard here and one catch below mean a malformed request can never take the server down.
     const send = (code, body) => {
+      if (res.writableEnded || res.destroyed) return;
       if (body === undefined) { res.writeHead(code).end(); return; }
       res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(body));
     };
-    if (!authed(req, token)) return send(401);          // 401 with no body, per §Presence.
-    const path = String(req.url || '/').split('?')[0];
+    try {
+      if (!authed(req, token)) return send(401);          // 401 with no body, per §Presence.
+      const path = String(req.url || '/').split('?')[0];
 
-    if (req.method === 'POST' && path === '/heartbeat') {
-      let body;
-      try { body = JSON.parse(await readBody(req)); } catch { return send(400); }
-      if (!valid(body)) return send(400);
-      let users = projects.get(body.project);
-      if (!users) projects.set(body.project, (users = new Map()));
-      // The server timestamps authoritatively; the client's advisory `ts` is discarded.
-      users.set(body.user, { user: body.user, step: body.step ?? null, state: body.state, ts: now() });
-      return send(204);
-    }
-
-    if (req.method === 'GET' && path.startsWith('/presence/')) {
-      let project;
-      try { project = decodeURIComponent(path.slice('/presence/'.length)); } catch { return send(400); }
-      const users = projects.get(project);
-      const cutoff = now() - MAX_AGE_MS;
-      const peers = [];
-      // Expiry on read: stale records are dropped as we pass them, so the Map self-cleans.
-      if (users) {
-        for (const [user, rec] of users) {
-          if (rec.ts < cutoff) users.delete(user); else peers.push(rec);
-        }
+      if (req.method === 'POST' && path === '/heartbeat') {
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { return send(400); }
+        if (!valid(body)) return send(400);
+        let users = projects.get(body.project);
+        if (!users) projects.set(body.project, (users = new Map()));
+        // The server timestamps authoritatively; the client's advisory `ts` is discarded.
+        users.set(body.user, { user: body.user, step: body.step ?? null, state: body.state, ts: now() });
+        return send(204);
       }
-      // Unknown project is [], never 404 — absence is an empty array. We do not know who is asking,
-      // so the caller filters itself out by `user`.
-      return send(200, { peers });
-    }
 
-    send(404);
+      if (req.method === 'GET' && path.startsWith('/presence/')) {
+        let project;
+        try { project = decodeURIComponent(path.slice('/presence/'.length)); } catch { return send(400); }
+        const users = projects.get(project);
+        const cutoff = now() - MAX_AGE_MS;
+        const peers = [];
+        // Expiry on read: stale records are dropped as we pass them, so the Map self-cleans.
+        if (users) {
+          for (const [user, rec] of users) {
+            if (rec.ts < cutoff) users.delete(user); else peers.push(rec);
+          }
+        }
+        // Unknown project is [], never 404 — absence is an empty array. We do not know who is asking,
+        // so the caller filters itself out by `user`.
+        return send(200, { peers });
+      }
+
+      send(404);
+    } catch { send(500); }
   });
 }
 

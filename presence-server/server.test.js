@@ -90,6 +90,20 @@ test('malformed bodies are 400, and an unknown route is 404', async () => {
   } finally { await s.close(); }
 });
 
+// S0108 audit: an over-long body destroys the request socket, and the 400 that followed used to
+// throw INSIDE an async handler — an unhandled rejection, which ends the process. One authenticated
+// 1MB POST could take the server down; systemd would restart it, but everyone's presence blinked.
+test('an oversized body is rejected without killing the server', async () => {
+  const s = await start();
+  try {
+    const huge = JSON.stringify({ project: PROJECT, user: 'X'.repeat(200000), step: null, state: 'idle' });
+    await s.beat(huge).catch(() => {}); // the socket may die mid-send — that is the point
+    // Still serving: the process survived, and normal traffic is unaffected.
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Reno', step: null, state: 'idle' })).status, 204);
+    assert.strictEqual((await s.peers()).status, 200);
+  } finally { await s.close(); }
+});
+
 test('starting with no PRESENCE_TOKEN exits non-zero and names the reason', () => {
   const env = { ...process.env };
   delete env.PRESENCE_TOKEN;

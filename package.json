@@ -146,7 +146,7 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "echo 'no bundling yet — ships src + node_modules'",
+    "vscode:prepublish": "node scripts/vendor-skills.js",
     "package": "vsce package",
     "check:syntax": "node scripts/check-syntax.js",
     "vendor:skills": "node scripts/vendor-skills.js",

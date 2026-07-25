@@ -1,8 +1,8 @@
 // In-extension self-updater (D-003): stock VS Code won't auto-update a side-loaded
 // VSIX, so we poll GitHub Releases ourselves, install a newer .vsix, and offer reload.
 // vscode is required LAZILY inside start() so node:test can import semverGt() headless.
-// ponytail: each update re-downloads the full ~238MB VSIX (bundled SDK); externalize
-// the binary if bandwidth ever matters (deferred in P01-S03 carryover).
+// (The ~238MB-download note that lived here died with P06-S10: the claude binary is no longer
+// bundled, so an update is the ~7MB .vsix.)
 const https = require('https');
 const fs = require('fs');
 const path = require('path');

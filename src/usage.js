@@ -49,25 +49,49 @@ function spawnArgs(claude) {
   return { command: claude, args, options: opts };
 }
 
+const FETCH_TIMEOUT_MS = 45000; // a poll that outlives this is wedged, not slow — kill it (S0108)
+
 // One real /usage call. stdin is closed ('ignore') to avoid the "no stdin data
 // received in 3s" stall the prototype hit calling claude non-interactively.
-function defaultFetch() {
+//
+// Three things here are load-bearing for the meter and were each a way to lose it silently:
+//   1. A hard timeout + kill. Without it a child that never exits leaves the promise unresolved
+//      forever — _tick never re-arms and the meter is dead for the life of the window, with no
+//      error to show for it.
+//   2. stderr is DRAINED. It is piped, so an unread pipe fills and blocks the child mid-write —
+//      the same permanent wedge, reachable whenever claude has anything chatty to say.
+//   3. An explicit cwd. The extension host's cwd is whatever launched VS Code (often a system
+//      dir); /usage is account-wide, so pin it to the home dir and remove the variable.
+// `spawnFn` is a test seam only — the wedge/kill path must be provable without spawning a
+// real claude (and CI has none installed).
+function defaultFetch({ timeoutMs = FETCH_TIMEOUT_MS, spawnFn = spawn, claudePath } = {}) {
   return new Promise((resolve) => {
-    const claude = findClaude(); // env → PATH → bundled fallback (same resolver as the SDK, D-019)
-    if (!claude) return resolve({ error: 'claude not found' }); // keeps last-good; never spawns null
-    let out = '';
+    const claude = claudePath !== undefined ? claudePath : findClaude(); // env → PATH → bundle (D-019)
+    if (!claude) return resolve({ error: 'claude not found on PATH' }); // keeps last-good; never spawns null
+    let out = '', err = '', timer = null, done = false;
+    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
     let p;
     const { command, args, options } = spawnArgs(claude);
-    try { p = spawn(command, args, options); }
-    catch (e) { return resolve({ error: e.message }); }
+    try { p = spawnFn(command, args, { ...options, cwd: os.homedir() }); }
+    catch (e) { return finish({ error: e.message }); }
+    timer = setTimeout(() => {
+      try { p.kill(); } catch { /* already gone */ }
+      finish({ error: `no answer from \`claude -p /usage\` in ${Math.round(timeoutMs / 1000)}s` });
+    }, timeoutMs);
     p.stdout.on('data', (d) => { out += d; });
-    p.on('error', (e) => resolve({ error: e.message }));
-    p.on('close', () => {
+    p.stderr.on('data', (d) => { if (err.length < 2000) err += d; }); // MUST read it — see (2) above
+    p.on('error', (e) => finish({ error: e.message }));
+    p.on('close', (code) => {
       try {
         const j = JSON.parse(out);
         cleanupUsageSession(j.session_id); // don't leave a transcript behind for a free poll
-        resolve(parseUsageText(j.result || ''));
-      } catch (e) { resolve({ error: 'usage parse failed: ' + e.message }); }
+        finish(parseUsageText(j.result || ''));
+      } catch (e) {
+        // Name what actually happened — exit code and the first line of stderr — so a broken
+        // meter is diagnosable from the panel instead of just showing a dash.
+        const why = err.trim().split('\n')[0] || (out.trim() ? e.message : 'no output');
+        finish({ error: `claude -p /usage failed (exit ${code}): ${why.slice(0, 160)}` });
+      }
     });
   });
 }
@@ -96,7 +120,10 @@ class UsageService extends EventEmitter {
   async _tick() {
     this.stopped = false; // a fresh tick (start or self-reschedule) is live until stop() says otherwise
     this._inFlight = true;
-    const r = await this.fetch();
+    // A fetch() that REJECTS would otherwise escape here, leaving _inFlight stuck true — start()
+    // then refuses to re-arm and the poller is dead until the window reloads. Never let it throw.
+    let r;
+    try { r = await this.fetch(); } catch (e) { r = { error: String((e && e.message) || e) }; }
     this._inFlight = false;
     if (this.stopped) return; // stop() ran while this poll was in flight — don't emit or re-arm
     if (r.error) {
@@ -124,7 +151,14 @@ class UsageService extends EventEmitter {
 
   setConfig({ threshold, pollSec }) {
     if (threshold != null) this.threshold = threshold;
+    const changed = pollSec != null && pollSec !== this.pollSec;
     if (pollSec != null) this.pollSec = pollSec;
+    // Re-arm a pending timer on the NEW cadence — otherwise dropping the poll to 10s to watch a
+    // broken meter still waits out the old hour-long delay before anything happens.
+    if (changed && this._timer != null) {
+      clearTimeout(this._timer);
+      this._timer = setTimeout(() => this._tick(), Math.max(10, this.pollSec) * 1000);
+    }
     this.emit('update', this.snapshot());
   }
 
@@ -133,4 +167,4 @@ class UsageService extends EventEmitter {
   describe() { return `Paused: account usage ${this.max}% ≥ ${this.threshold}% — waiting for it to drop`; }
 }
 
-module.exports = { UsageService, defaultFetch, cleanupUsageSession, parseUsageText, spawnArgs };
+module.exports = { UsageService, defaultFetch, cleanupUsageSession, parseUsageText, spawnArgs, FETCH_TIMEOUT_MS };

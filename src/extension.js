@@ -180,8 +180,9 @@ function postSettings() {
   for (const [key, spec] of Object.entries(SETTING_SPEC)) values[key] = c.get(key, spec.def);
   post({ kind: 'settings', values });
 }
-// Frozen §Webview⇄host shape. `paused` reflects the Runner holding on the usage gate (S08).
-function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error }); }
+// Frozen §Webview⇄host shape (`checked` is additive — no existing field changed). `paused`
+// reflects the Runner holding on the usage gate (S08); `checked` dates a stale reading.
+function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error, checked: s.checked }); }
 
 // " · done/total" from PROGRESS.md, or "" when unreadable/not a master-plan project (P09-S15).
 function planFrac(dir) { const f = readPlanFraction(dir); return f ? ` · ${f.done}/${f.total}` : ''; }

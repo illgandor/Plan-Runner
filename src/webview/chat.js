@@ -21,6 +21,7 @@
       <div class="gauge"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span></div>
       <div class="gauge tokrow" id="tokrow" style="display:none" title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
       <label class="thresh" title="Pause the loop at this account-usage % (applies to all windows)">Pause @ <input id="thresh" type="number" min="10" max="100" step="1">%</label>
+      <div class="uerr" id="uerr" hidden></div>
     </div>
     <div class="status" id="status" aria-live="polite">Idle</div>
     <div id="log"></div>
@@ -623,6 +624,23 @@
     }
     const t = $('thresh');
     if (d.threshold != null && document.activeElement !== t) t.value = d.threshold; // don't fight the editor
+    paintUsageError(d, codex);
+  }
+  // A meter stuck on "—" used to say nothing about WHY (a dead poll, a missing claude, a parse
+  // failure all looked identical). Show the reason when there is no reading at all, and date the
+  // reading in the tooltip when we're painting a stale one.
+  function paintUsageError(d, codex) {
+    const e = $('uerr');
+    const blank = !codex && d.session == null && d.week == null;
+    e.hidden = !(blank && d.error);
+    if (!e.hidden) e.textContent = '⚠ ' + d.error;
+    const age = d.checked ? ` · reading from ${agoText(Date.now() - d.checked)} ago` : '';
+    $('meter').title = codex ? 'Codex reports no account usage %'
+      : (d.error ? `Last usage check failed: ${d.error}${age}` : (d.checked ? `Usage checked ${agoText(Date.now() - d.checked)} ago` : ''));
+  }
+  function agoText(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    return s < 60 ? s + 's' : (s < 3600 ? Math.round(s / 60) + 'm' : Math.round(s / 3600) + 'h');
   }
   function paintBar(bar, txt, v) {
     if (v == null) return;            // keep last-good; never blank

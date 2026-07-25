@@ -3,7 +3,7 @@
 // spends no Claude usage — fetch is faked, nothing spawns.
 const test = require('node:test');
 const assert = require('node:assert');
-const { UsageService, parseUsageText, spawnArgs } = require('../src/usage');
+const { UsageService, parseUsageText, spawnArgs, defaultFetch } = require('../src/usage');
 
 const REAL = 'Current session: 42% used\nCurrent week (all models): 71% used';
 
@@ -69,6 +69,41 @@ test('stop() during an in-flight poll does not re-arm the timer', async () => {
   resolveFetch({ session: 42, week: 71 });
   await new Promise((r) => setImmediate(r)); // let _tick's continuation run
   assert.strictEqual(svc._timer, null, 'no timer re-armed after stop()');
+});
+
+// S0108 audit: the two ways the meter used to die permanently and silently.
+test('a fetch that REJECTS is an error poll, not a dead poller', async () => {
+  const svc = new UsageService({ fetch: () => Promise.reject(new Error('spawn exploded')) });
+  await svc._tick();
+  svc.stop();
+  assert.match(svc.error, /spawn exploded/);
+  assert.strictEqual(svc._inFlight, false, '_inFlight cleared — start() can re-arm');
+});
+
+test('defaultFetch kills a child that never exits instead of hanging forever', async () => {
+  // The wedge this reproduces: a child that never emits 'close' (an unread stderr pipe blocking
+  // it mid-write does exactly this). Before the timeout, the promise never settled — and a poll
+  // that never settles leaves _inFlight true, so the meter is dead until the window reloads.
+  let killed = false;
+  const fakeChild = { stdout: { on() {} }, stderr: { on() {} }, on() {}, kill() { killed = true; } };
+  const r = await defaultFetch({ timeoutMs: 30, claudePath: 'C:\\fake\\claude.exe', spawnFn: () => fakeChild });
+  assert.match(r.error, /no answer/, 'names the timeout instead of showing a bare dash');
+  assert.ok(killed, 'the wedged child is killed, not leaked');
+});
+
+test('defaultFetch reads stderr — an unread pipe is what wedges the child', () => {
+  // Guard the fix itself: if stderr is ever left undrained again, this fails.
+  const src = require('fs').readFileSync(require.resolve('../src/usage.js'), 'utf8');
+  assert.match(src, /p\.stderr\.on\('data'/, 'stderr must be drained');
+});
+
+test('the poll cadence re-arms on a settings change', async () => {
+  const svc = new UsageService({ pollSec: 3600, fetch: () => Promise.resolve({ session: 1, week: 1 }) });
+  await svc._tick();
+  const first = svc._timer;
+  svc.setConfig({ pollSec: 10 });
+  assert.notStrictEqual(svc._timer, first, 'the pending hour-long timer was replaced');
+  svc.stop();
 });
 
 // P05-S02: start() while a poll is already in flight must not spawn a second loop.

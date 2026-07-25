@@ -23,6 +23,14 @@ const jobs = [
 
 let copied = 0;
 for (const j of jobs) {
+  // No skills dir at all = not an authoring machine (CI, a fresh clone). Keep the committed
+  // resources/ exactly as they are and move on — this is what lets `vscode:prepublish` run this
+  // on every package, which is what stops a `vsce package` without a version bump from shipping
+  // skills older than the masters on disk.
+  if (!fs.existsSync(j.from)) {
+    console.log(`skip ${j.engine}: no master at ${j.from} — keeping the committed resources/.`);
+    continue;
+  }
   for (const name of REQUIRED) {
     const src = path.join(j.from, name);
     if (!fs.existsSync(path.join(src, 'SKILL.md'))) {
@@ -42,7 +50,7 @@ for (const j of jobs) {
 // only) — kept byte-identical to the skill's copy per D-018.
 const checker = path.join(claudeSkills, 'master-plan', 'scripts', 'plan_check.py');
 const tools = path.join(repo, 'planning', 'tools');
-if (fs.existsSync(tools)) {
+if (fs.existsSync(tools) && fs.existsSync(checker)) {
   fs.copyFileSync(checker, path.join(tools, 'plan_check.py'));
   console.log('vendored planning/tools/plan_check.py');
 }
