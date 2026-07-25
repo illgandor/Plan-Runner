@@ -463,6 +463,9 @@
       case 'attached': insertAtCursor($('input'), d.paths.map((p) => '@' + p).join(' ') + ' '); break;
       case 'mcp': renderMcp(d.engine, d.servers || []); break;
       case 'settings': renderSettings(d.values || {}); break;
+      // Presence (P10-S06): the element is created on the FIRST message, so an unconfigured
+      // workspace — which never sends one — has no presence element in the DOM at all.
+      case 'presence': renderPresence(presenceSlot(), d.peers); break;
     }
   });
 
@@ -653,6 +656,12 @@
     const set = (open) => { const o = defaultOption(sel); if (o) o.textContent = open ? (o.dataset.expanded || 'default') : 'default'; };
     sel.addEventListener('mousedown', () => set(true));
     ['blur', 'change'].forEach((e) => sel.addEventListener(e, () => set(false)));
+  }
+  // Presence sits under the status line, and only once presence has actually reported (P10-S06).
+  let presenceEl = null;
+  function presenceSlot() {
+    if (!presenceEl) { presenceEl = document.createElement('div'); app.insertBefore(presenceEl, log); }
+    return presenceEl;
   }
   let lastState;
   function setStatus(d) {
