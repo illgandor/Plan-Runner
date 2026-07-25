@@ -466,7 +466,11 @@ function installSkills(force) {
     const results = skills.install({ force });
     const changed = results.filter((r) => r.action === 'installed' || r.action === 'updated');
     const names = [...new Set(changed.map((r) => r.name))]; // per-engine results → one line per skill name
-    return names.length ? `Skills ${force ? 'updated' : 'installed'}: ${names.join(', ')}` : null;
+    const stuck = [...new Set(results.filter((r) => r.action === 'backup-failed').map((r) => r.name))];
+    const note = names.length ? `Skills ${force ? 'updated' : 'installed'}: ${names.join(', ')}` : null;
+    if (!stuck.length) return note;
+    // surfaced, not silent: these kept the on-disk copy because it couldn't be backed up
+    return [note, `Skills left as-is (backup failed): ${stuck.join(', ')}`].filter(Boolean).join(' · ');
   } catch (e) {
     return `Could not install skills: ${String((e && e.message) || e)}`;
   }
@@ -480,7 +484,14 @@ function activate(context) {
   state.effort = context.workspaceState.get('planRunner.effort') || '(default)';
   state.mode = context.workspaceState.get('planRunner.mode') || 'auto';
   clampSelections(); // drop a persisted mode the current engine can't honor (e.g. codex sans auto-review)
-  skillNote = installSkills(false); // install-if-missing on every activation
+  // Refresh the skills once per extension version — install-if-missing alone meant an
+  // update never delivered improved skills to anyone who already had a copy. Stamped in
+  // globalState so it fires on an upgrade, not on every window. install() backs the old
+  // copy up to <name>.bak before overwriting.
+  const skillsFor = require('../package.json').version;
+  const skillsStale = context.globalState.get('planRunner.skillsVersion') !== skillsFor;
+  skillNote = installSkills(skillsStale);
+  if (skillsStale) context.globalState.update('planRunner.skillsVersion', skillsFor);
   updater.start(context);           // poll GitHub Releases for a newer .vsix (D-003)
 
   // Account-wide usage poller, seeded from application-scoped §Config (D-004).

@@ -131,6 +131,8 @@
     "vscode:prepublish": "echo 'no bundling yet — ships src + node_modules'",
     "package": "vsce package",
     "check:syntax": "node scripts/check-syntax.js",
+    "vendor:skills": "node scripts/vendor-skills.js",
+    "version": "node scripts/vendor-skills.js && git add resources",
     "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {

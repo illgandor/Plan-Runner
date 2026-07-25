@@ -8,10 +8,14 @@ judgment layer.
 
 ## Step grammar & sizing
 
-A **step** is the unit one fresh Claude Code session executes end-to-end.
+A **step** is the unit one fresh agent session executes end-to-end.
 
-1. **Size to one context window.** The reference window is one fresh **Opus 4.8
-   (1M-token)** Claude Code session — the model the owner runs by default; size
+> **Agent-instructions file.** Where this file says `CLAUDE.md`, read it as "the
+> agent-instructions file at the repo root" — `CLAUDE.md` under Claude Code,
+> `AGENTS.md` under Codex. One file, named per engine.
+
+1. **Size to one context window.** The reference window is one fresh large-context
+   session (the owner's default model — currently a 1M-token window); size
    against that, not a smaller model's budget. At 1M tokens raw token count is
    rarely the binding limit, so the heuristics below (not token math) are what
    actually cap a step. `[S]` = light session, `[M]` = full session. `[L]` is
@@ -174,7 +178,7 @@ Goal: standard layout with zero history loss and no rewriting of the past.
    legacy status docs (curate — do not paste narratives). Facts gets the
    hard-won pitfalls (they are the most valuable legacy content).
 5. **Standard files.** SESSION_PROMPT.md, OWNER_TODO.md (migrate open items,
-   dated), GATES.md, CONVENTIONS.md, CLAUDE.md pointer block, plan_check.py.
+   dated), GATES.md, CONVENTIONS.md, agent-instructions pointer block, plan_check.py.
 6. **Stamp every legacy doc's header** with
    `> SUPERSEDED (date) → see PROGRESS.md / planning/ — kept for history.`
    and confirm no legacy doc still claims to be current anywhere.

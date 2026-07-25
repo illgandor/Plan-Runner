@@ -56,6 +56,21 @@ test('install-if-missing keeps an existing copy; force overwrites', () => {
   });
 });
 
+test('a forced overwrite parks the previous copy in <name>.bak (skill dirs are not in git)', () => {
+  withHomes((claude) => {
+    skills.install();
+    const dir = path.join(claude, 'skills', 'next-step');
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), 'HAND-EDITED');
+    fs.writeFileSync(path.join(dir, 'scratch.md'), 'local note');   // a file the bundle lacks
+    skills.install({ force: true });
+    assert.notStrictEqual(fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8'), 'HAND-EDITED');
+    assert.strictEqual(fs.readFileSync(path.join(`${dir}.bak`, 'SKILL.md'), 'utf8'), 'HAND-EDITED',
+      'the overwritten copy must be recoverable');
+    assert.ok(fs.existsSync(path.join(`${dir}.bak`, 'scratch.md')), 'backup keeps unbundled files too');
+    assert.ok(!fs.existsSync(path.join(dir, 'scratch.md')), 'a forced install is a clean replace');
+  });
+});
+
 test('CODEX_MODELS is refreshed to the gpt-5.6 tier (sol/terra/luna) plus (default)', () => {
   assert.strictEqual(CODEX_CAPS.models[0], '(default)');
   for (const tier of ['sol', 'terra', 'luna']) {

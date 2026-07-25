@@ -77,7 +77,13 @@ Follow `references/conversion-rules.md` exactly. The short version:
 
 ## STEP 3 — Write the standard layout
 
-Generate every file from `references/templates.md` (exact templates there):
+Generate every file from `references/templates.md` (exact templates there).
+
+**Every path you write is repo-root-relative** — no drive letters, no `~`, no
+home/vault/user folders, no machine names. Write "the repo root", never the
+absolute path of the folder you are sitting in. SESSION_PROMPT.md and LOCKED
+plans are hash-locked, so a machine path in one of them can never be fixed in a
+clone without breaking everyone else's hash.
 
 ```
 <root>/PROGRESS.md          # THE dashboard — bounded, the only status doc
@@ -132,3 +138,11 @@ Mode specifics:
   and built as P01-S01 (see conversion-rules §Website preview gate).
 - `scripts/plan_check.py` — canonical checker; copy into each project's
   `planning/tools/` (refresh the copy on CHECK & REPAIR if the skill's is newer).
+
+## Self-improvement closer — intentionally omitted
+<!-- closer: intentionally-omitted -->
+This skill deliberately ships without the improvement-retrospective closer the
+authoring guide otherwise mandates. master-plan is the planning system's own
+machinery; it must stay stable, not rewrite itself mid-run. Changes to it are
+deliberate owner edits, never a per-invocation retrospective. The catalog honors
+this marker and does not flag the omission.

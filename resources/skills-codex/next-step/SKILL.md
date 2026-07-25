@@ -15,9 +15,9 @@ description: >
 metadata:
   origin: claude
   mirrored_from: next-step
-  source_sha: b7fd0a9ae097f8e6ee2b5ef2c632fbdbae9cb110f456768c582a1f214912b8c8
-  twin_sha: 892c9cd9f631f17b6e4adf244a8f7331493762f233d23bdb432c906df4ec2d03
-  synced: 2026-07-15
+  source_sha: 1d3ccb67aea18593457e2a4896513a766639c0008b40df999423e508dbf0be7c
+  twin_sha: d5a713a04c6a12c9d6ef593d63c7f954cc014aa84a9b73f61dbf97383350e51d
+  synced: 2026-07-24
 ---
 
 # Next Step — execute one master-plan step
@@ -27,8 +27,8 @@ committed, and doc-clean. This is the running counterpart to the planning
 `master-plan` skill: `master-plan` writes the plan; `next-step` executes it, one
 bounded step at a time.
 
-> **Fresh context is the whole point.** Each step is sized for one fresh Opus 4.8
-> (1M-token) window. Run this in a NEW session (or clear context first) — a session
+> **Fresh context is the whole point.** Each step is sized for one fresh Codex
+> context window. Run this in a NEW session (or clear context first) — a session
 > already full of unrelated work defeats the bounded-read design. If the owner
 > says "assessment only," do STEP 0–2 and report the step; don't implement.
 
@@ -117,3 +117,11 @@ new row `<id>b` ⬜ + `NEXT: <id>b`), log a one-line Amendment. Never end red.
   repo's rotation / split / amendment specifics.
 - The `master-plan` skill — planning, CHECK & REPAIR, plan close, ADOPT, and the
   budgets enforced by `plan_check.py`.
+
+## Self-improvement closer — intentionally omitted
+<!-- closer: intentionally-omitted -->
+This skill deliberately ships without the improvement-retrospective closer the
+authoring guide otherwise mandates. next-step is the planning system's own
+execution machinery; it must stay stable, not rewrite itself mid-run. Changes to
+it are deliberate owner edits, never a per-invocation retrospective. The catalog
+honors this marker and does not flag the omission.

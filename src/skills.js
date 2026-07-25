@@ -38,6 +38,9 @@ function status() {
 
 // Copy each bundled skill into every engine's skill dir. force=true overwrites (for
 // updating); otherwise an existing skill is kept untouched.
+// A forced overwrite moves the old copy to <name>.bak first — skill dirs live outside
+// any repo, so without that a local edit would be unrecoverable. If the backup can't
+// be taken we KEEP the existing copy rather than clobber it unbacked.
 function install({ force = false } = {}) {
   const results = [];
   for (const p of platforms()) {
@@ -45,7 +48,17 @@ function install({ force = false } = {}) {
     for (const name of REQUIRED) {
       const from = path.join(p.src, name), to = path.join(p.root, name);
       if (!fs.existsSync(path.join(from, 'SKILL.md'))) { results.push({ engine: p.engine, name, action: 'missing-source' }); continue; }
-      if (fs.existsSync(path.join(to, 'SKILL.md')) && !force) { results.push({ engine: p.engine, name, action: 'kept' }); continue; }
+      const exists = fs.existsSync(path.join(to, 'SKILL.md'));
+      if (exists && !force) { results.push({ engine: p.engine, name, action: 'kept' }); continue; }
+      if (exists) {
+        try {
+          fs.rmSync(`${to}.bak`, { recursive: true, force: true }); // one slot, newest wins
+          fs.renameSync(to, `${to}.bak`);                           // also clears files the bundle dropped
+        } catch (e) {
+          results.push({ engine: p.engine, name, action: 'backup-failed' });
+          continue; // keep what's on disk — an un-backed-up overwrite is worse than a stale skill
+        }
+      }
       fs.cpSync(from, to, { recursive: true });
       results.push({ engine: p.engine, name, action: force ? 'updated' : 'installed' });
     }

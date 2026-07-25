@@ -111,3 +111,11 @@ new row `<id>b` ⬜ + `NEXT: <id>b`), log a one-line Amendment. Never end red.
   repo's rotation / split / amendment specifics.
 - The `master-plan` skill — planning, CHECK & REPAIR, plan close, ADOPT, and the
   budgets enforced by `plan_check.py`.
+
+## Self-improvement closer — intentionally omitted
+<!-- closer: intentionally-omitted -->
+This skill deliberately ships without the improvement-retrospective closer the
+authoring guide otherwise mandates. next-step is the planning system's own
+execution machinery; it must stay stable, not rewrite itself mid-run. Changes to
+it are deliberate owner edits, never a per-invocation retrospective. The catalog
+honors this marker and does not flag the omission.

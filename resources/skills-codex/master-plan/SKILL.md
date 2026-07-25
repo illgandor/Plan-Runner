@@ -9,16 +9,16 @@ description: >
   plan," "set up the planning system," "make this a stepped/detailed build
   plan," "organize the plans / progress docs," "add an expansion plan," "plan
   the next phase," "make a session prompt," "check/repair the planning docs,"
-  or "migrate this project to the standard planning layout." Runs after Claude
+  or "migrate this project to the standard planning layout." Runs after Codex
   drafts an initial rough plan; re-run any time to verify, repair, and rotate.
   Distilled from what worked (TowDefender, Lantern Lock) and what collapsed
   (CutClean's 1.7MB PROGRESS.md) across the Not A Cult LLC portfolio.
 metadata:
   origin: claude
   mirrored_from: master-plan
-  source_sha: 4f74a6c338e34e0da69cf12e25c894bc234f1b31e4b492cfab6dde38cdc4bfe6
-  twin_sha: 03b230790f58a1a5a0e5f00677bb92b34061e07f40b6cba88dd3814be9278eec
-  synced: 2026-07-15
+  source_sha: 26314772a2bd90a90287a5ecdd7684738858a2a3d243cd3fe18e2270e44a194c
+  twin_sha: 02eaefbae6d7653fc1e77e61574fce56934ee0440dc68f56de79364e713eccc3
+  synced: 2026-07-24
 ---
 
 # Master Plan — standardized planning system
@@ -66,7 +66,7 @@ State the detected mode before acting. All modes end with STEP 4.
 Follow `references/conversion-rules.md` exactly. The short version:
 
 - Draft phases → milestones → flat steps `P<NN>-S<KK>`, each sized `[S]` or
-  `[M]` = one fresh Opus 4.8 (1M-token) context window. Nothing larger is a
+  `[M]` = one fresh Codex context window. Nothing larger is a
   legal step — split it.
 - Every step: 7 labeled fields (Objective / Context / Files / Approach /
   Completion criteria / Verify / Carryover), ≤40 lines, DoD decidable from the
@@ -83,13 +83,19 @@ Follow `references/conversion-rules.md` exactly. The short version:
 
 ## STEP 3 — Write the standard layout
 
-Generate every file from `references/templates.md` (exact templates there):
+Generate every file from `references/templates.md` (exact templates there).
+
+**Every path you write is repo-root-relative** — no drive letters, no `~`, no
+home/vault/user folders, no machine names. Write "the repo root", never the
+absolute path of the folder you are sitting in. SESSION_PROMPT.md and LOCKED
+plans are hash-locked, so a machine path in one of them can never be fixed in a
+clone without breaking everyone else's hash.
 
 ```
 <root>/PROGRESS.md          # THE dashboard — bounded, the only status doc
 <root>/SESSION_PROMPT.md    # static copy-paste bootstrap — the ONLY copy
 <root>/OWNER_TODO.md        # human actions: ## Open / ## Done audit trail
-<root>/CLAUDE.md            # gains one sentinel-delimited pointer block
+<root>/AGENTS.md            # gains one sentinel-delimited pointer block
 <root>/planning/plans/PLAN-NN-<slug>.md      # immutable plans (hash-tracked)
 <root>/planning/reference/  # GATES.md, CONVENTIONS.md, CONTRACTS.md, runbooks
 <root>/planning/archive/    # session shards + plan closeouts (never required reading)
@@ -138,3 +144,11 @@ Mode specifics:
   and built as P01-S01 (see conversion-rules §Website preview gate).
 - `scripts/plan_check.py` — canonical checker; copy into each project's
   `planning/tools/` (refresh the copy on CHECK & REPAIR if the skill's is newer).
+
+## Self-improvement closer — intentionally omitted
+<!-- closer: intentionally-omitted -->
+This skill deliberately ships without the improvement-retrospective closer the
+authoring guide otherwise mandates. master-plan is the planning system's own
+machinery; it must stay stable, not rewrite itself mid-run. Changes to it are
+deliberate owner edits, never a per-invocation retrospective. The catalog honors
+this marker and does not flag the omission.

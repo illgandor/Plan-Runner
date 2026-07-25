@@ -47,6 +47,22 @@ STATUS_GLYPHS = {"⬜", "🔧", "✅", "⏸️", "⏸", "❌", "👤⬜", "👤�
 PROMPT_SENTINEL = "One step is your entire job today."
 FORBIDDEN_PROGRESS = ["<details>", "Why this state", "Full detail in"]
 
+# Machine-local paths in planning docs. A clone lands wherever its owner puts it,
+# so a path that locates THIS repo on one machine is wrong everywhere else — and
+# in a hash-locked doc (SESSION_PROMPT.md, a LOCKED plan) it can never be fixed
+# downstream without breaking the hash for the other clone. Deliberately narrow:
+# drive letters, UNC shares, POSIX home roots, and elided path prefixes ("…/x").
+# NOT bare "~/" or generic a\b\c — projects legitimately document external tool
+# locations (~/.claude, %LOCALAPPDATA%\…\codex.exe), and a check that cries wolf
+# is a check people stop reading.
+ABS_PATH_RE = re.compile(
+    r"(?<![A-Za-z])[A-Za-z]:[\\/]"          # C:\ or C:/ — not http:// (p preceded by a letter)
+    r"|\\\\[A-Za-z0-9_.$-]+\\"              # \\server\share
+    r"|/(?:home|Users|mnt)/"                # /home/x  /Users/x  /mnt/c
+    r"|(?:…|\.\.\.)[\\/][\w .()-]")         # …/03 Projects — a truncated absolute path
+PATH_SCAN_GLOBS = ["PROGRESS.md", "SESSION_PROMPT.md", "CLAUDE.md", "AGENTS.md",
+                   "planning/**/*.md"]
+
 STEP_ID_RE = re.compile(r"P\d{2}-S\d{2}[ab]?")
 STEP_HEADING_RE = re.compile(r"^#### \[(P\d{2}-S\d{2}[ab]?)\]")
 NEXT_RE = re.compile(r"^NEXT: (P\d{2}-S\d{2}[ab]?\b|PLAN COMPLETE\b|none\b)")
@@ -399,7 +415,10 @@ def check_plans(root: Path, hashes, progress_text):
             if rel not in hashes:
                 add("FAIL", f"{f.name} hash recorded",
                     "not in plan-hashes.json — a LOCKED/COMPLETE plan with no"
-                    " recorded hash has no immutability guard; run --update-hashes")
+                    " recorded hash has no immutability guard. Confirm the plan"
+                    " is UNCHANGED first (git log -p on it); --update-hashes"
+                    " blesses whatever is on disk, so re-hashing an edited plan"
+                    " launders the edit. Unchanged: run --update-hashes.")
             elif hashes[rel] != sha256(f):
                 add("FAIL", f"{f.name} immutability",
                     "hash mismatch — a LOCKED plan was edited. Revert, or record the"
@@ -430,18 +449,23 @@ def check_prompt(root: Path, hashes):
 
 
 def check_misc(root: Path):
-    c = root / "CLAUDE.md"
+    # The agent-instructions file is named per engine: CLAUDE.md (Claude Code) or
+    # AGENTS.md (Codex). Check whichever the project actually has; only warn as
+    # missing when neither exists.
+    c = next((root / n for n in ("CLAUDE.md", "AGENTS.md") if (root / n).exists()),
+             root / "CLAUDE.md")
     if c.exists():
         text = read(c)
         n = text.count("<!-- PLANDOC:POINTER")
         if n != 1:
-            add("WARN", "CLAUDE.md pointer block", f"{n} sentinel blocks (want exactly 1)")
+            add("WARN", f"{c.name} pointer block", f"{n} sentinel blocks (want exactly 1)")
         if c.stat().st_size > CLAUDE_WARN_BYTES:
-            add("WARN", "CLAUDE.md size",
+            add("WARN", f"{c.name} size",
                 f"{c.stat().st_size} > {CLAUDE_WARN_BYTES} — project-facts narrative"
-                " belongs in commits/archive, not CLAUDE.md")
+                f" belongs in commits/archive, not {c.name}")
     else:
-        add("WARN", "CLAUDE.md exists", "missing (pointer block not installed)")
+        add("WARN", "CLAUDE.md/AGENTS.md exists",
+            "neither found (pointer block not installed)")
     ot = root / "OWNER_TODO.md"
     if not ot.exists():
         add("WARN", "OWNER_TODO.md exists", "missing")
@@ -485,6 +509,22 @@ def update_hashes(root: Path, hpath: Path):
     print(f"recorded {len(hashes)} hash(es) → {hpath}")
 
 
+def check_paths(root: Path):
+    """WARN on machine-local paths — they break the moment someone else clones."""
+    seen = set()
+    for pattern in PATH_SCAN_GLOBS:
+        for f in sorted(root.glob(pattern)):
+            if not f.is_file() or f in seen:
+                continue
+            seen.add(f)
+            rel = f.relative_to(root).as_posix()
+            for n, line in enumerate(read(f).splitlines(), 1):
+                if ABS_PATH_RE.search(line):
+                    add("WARN", "paths are repo-relative",
+                        f"{rel}:{n} looks machine-local — use a repo-root-relative"
+                        f" path: {line.strip()[:60]}")
+
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -517,6 +557,7 @@ def main():
     check_plans(root, hashes, progress_text)
     check_prompt(root, hashes)
     check_misc(root)
+    check_paths(root)
 
     fails = [r for r in results if r[0] == "FAIL"]
     warns = [r for r in results if r[0] == "WARN"]
