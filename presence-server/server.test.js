@@ -213,6 +213,51 @@ test('an expired peer leaves /projects peers but stays in people; unknown = empt
   } finally { await s.close(); }
 });
 
+// P11-S04 — the dashboard document. `GET /` is the ONLY unauthenticated route (§Dashboard auth split).
+test('GET / serves the page unauthenticated with a fresh nonce, while data stays bearer-only', async () => {
+  const s = await start();
+  try {
+    const res = await fetch(`${s.base}/`);
+    assert.strictEqual(res.status, 200);
+    assert.match(res.headers.get('content-type'), /^text\/html/);
+    const csp = res.headers.get('content-security-policy');
+    assert.match(csp, /default-src 'none'/);
+    const nonce = /script-src 'nonce-([^']+)'/.exec(csp)[1];
+    const html = await res.text();
+    assert.ok(html.includes(`nonce="${nonce}"`), 'the served page carries this response\'s nonce');
+    assert.ok(!html.includes('%NONCE%'), 'every placeholder was substituted');
+
+    // A nonce fixed at boot is no better than 'unsafe-inline' — each load must get its own.
+    const two = await fetch(`${s.base}/`);
+    assert.notStrictEqual(/script-src 'nonce-([^']+)'/.exec(
+      two.headers.get('content-security-policy'))[1], nonce);
+
+    // The exemption is exactly one route: every data route still 401s with no token.
+    assert.strictEqual((await fetch(`${s.base}/projects`)).status, 401);
+    assert.strictEqual((await fetch(`${s.base}/heartbeat`, { method: 'POST' })).status, 401);
+    assert.strictEqual((await fetch(`${s.base}/presence/x`)).status, 401);
+  } finally { await s.close(); }
+});
+
+test('the dashboard loads nothing external and never uses innerHTML', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'dashboard.html'), 'utf8');
+  assert.doesNotMatch(html, /https?:|<link|\ssrc\s*=/i);      // no CDN, no font, no external script
+  // D-015 applies here too: peer names and step ids are remote input, so they go in as TEXT only.
+  assert.doesNotMatch(html, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+  assert.match(html, /textContent/);
+});
+
+test('a user name containing markup survives the wire verbatim — the server never escapes it', async () => {
+  const s = await start({ now: () => 1000 });
+  const evil = '<img src=x onerror=alert(1)>';
+  try {
+    await s.beat({ project: PROJECT, user: evil, step: '</script>', state: 'running' });
+    const [p] = (await (await s.projects()).json()).projects;
+    assert.strictEqual(p.people[0].user, evil);   // JSON, not HTML: escaping is the PAGE's job
+    assert.strictEqual(p.peers[0].step, '</script>');
+  } finally { await s.close(); }
+});
+
 test('starting with no PRESENCE_TOKEN exits non-zero and names the reason', () => {
   const env = { ...process.env };
   delete env.PRESENCE_TOKEN;

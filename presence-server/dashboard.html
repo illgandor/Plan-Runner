@@ -1,0 +1,128 @@
+<!doctype html>
+<!-- P11-S04. The whole dashboard: one file, no build step, no CDN, no font, no dependency.
+     Served at GET / unauthenticated (CONTRACTS §Dashboard auth split) because a browser cannot
+     attach a bearer header to its own address-bar load. It ships ZERO data — it asks the viewer
+     for the token and fetches /projects itself. %NONCE% is substituted per response by server.js.
+     D-015 applies here too: user names and step ids are remote input, so every one of them goes
+     into the page with textContent. Nothing here is ever assigned to the DOM as markup. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plan Runner presence</title>
+<style nonce="%NONCE%">
+:root { color-scheme: dark light }
+body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 1.5rem; max-width: 54rem }
+h1 { font-size: 1.05rem; margin: 0 0 .35rem }
+p { margin: 0 0 1rem }
+.dim { opacity: .6 }
+.proj { border: 1px solid #8886; border-radius: 6px; padding: .6rem .9rem; margin: 0 0 .7rem }
+.proj h2 { font: 600 .9rem ui-monospace, monospace; margin: 0 0 .4rem }
+table { border-collapse: collapse; width: 100% }
+td { padding: .1rem .6rem .1rem 0; vertical-align: top }
+.live { color: #2ea043; font-weight: 600; white-space: nowrap }
+.step { font-family: ui-monospace, monospace; opacity: .75 }
+.when { text-align: right; white-space: nowrap; opacity: .6 }
+button { font: inherit; cursor: pointer }
+</style>
+</head>
+<body>
+<h1>Plan Runner &mdash; who is on what</h1>
+<p class="dim">Heartbeats fire only while someone&rsquo;s panel is visible, so last-seen under-reports.
+An empty row means &ldquo;no evidence&rdquo;, never &ldquo;nobody worked on it&rdquo;.</p>
+<p><button id="all">Show all</button> <button id="forget">Forget token</button>
+<span id="status" class="dim"></span></p>
+<div id="out"></div>
+<script nonce="%NONCE%">
+'use strict';
+var KEY = 'plan-runner-presence-token', WINDOW_MS = 30 * 86400000;
+var showAll = false, timer = null;
+
+function status(t) { document.getElementById('status').textContent = t; }
+
+// Asked for once, then remembered. A 401 clears it and we ask again.
+function token() {
+  var t = localStorage.getItem(KEY);
+  if (!t) { t = prompt('Presence token'); if (t) localStorage.setItem(KEY, t); }
+  return t;
+}
+
+function ago(t) {
+  var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 90) return s + 's ago';
+  if (s < 5400) return Math.round(s / 60) + 'm ago';
+  if (s < 172800) return Math.round(s / 3600) + 'h ago';
+  return Math.round(s / 86400) + 'd ago';
+}
+
+function el(tag, text, cls) {
+  var e = document.createElement(tag);
+  if (text != null) e.textContent = text;   // the ONLY way remote strings enter this page
+  if (cls) e.className = cls;
+  return e;
+}
+
+function render(projects) {
+  var out = document.getElementById('out');
+  out.textContent = '';
+  var cutoff = Date.now() - WINDOW_MS, shown = 0;
+  projects.forEach(function (p) {                    // already sorted by the server (D-050)
+    var people = showAll ? p.people : p.people.filter(function (r) { return r.lastSeen >= cutoff; });
+    if (!people.length) return;
+    shown++;
+    var live = {};
+    p.peers.forEach(function (x) { live[x.user] = x; });
+    var box = el('section', null, 'proj');
+    box.appendChild(el('h2', p.project));
+    var table = document.createElement('table');
+    people.forEach(function (r) {
+      var l = live[r.user], tr = document.createElement('tr');
+      tr.appendChild(el('td', r.user));
+      tr.appendChild(el('td', l ? (l.state === 'running' ? '● running' : '● idle') : '',
+        l ? 'live' : 'dim'));
+      tr.appendChild(el('td', (l && l.step) || r.step || '', 'step'));
+      tr.appendChild(el('td', l ? 'now' : ago(r.lastSeen), 'when'));
+      table.appendChild(tr);
+    });
+    box.appendChild(table);
+    out.appendChild(box);
+  });
+  if (!shown) {
+    out.appendChild(el('p', projects.length
+      ? 'Nothing in the last 30 days — try "Show all".' : 'No projects known yet.', 'dim'));
+  }
+}
+
+function load() {
+  var t = token();
+  if (!t) { status('No token — reload the page to enter one.'); clearInterval(timer); return; }
+  fetch('/projects', { headers: { authorization: 'Bearer ' + t } }).then(function (res) {
+    if (res.status === 401) {
+      localStorage.removeItem(KEY);
+      status('Token rejected.');
+      setTimeout(load, 300);                          // clears the stored token, then re-prompts
+      return null;
+    }
+    if (!res.ok) { status('Server error ' + res.status + '.'); return null; }
+    return res.json();
+  }).then(function (data) {
+    if (!data) return;
+    render(data.projects || []);
+    status('Updated ' + new Date().toLocaleTimeString());
+  }).catch(function () { status('Offline — retrying.'); });
+}
+
+document.getElementById('all').addEventListener('click', function () {
+  showAll = !showAll;
+  this.textContent = showAll ? 'Last 30 days' : 'Show all';
+  load();
+});
+document.getElementById('forget').addEventListener('click', function () {
+  localStorage.removeItem(KEY);
+  location.reload();
+});
+timer = setInterval(load, 30000);
+load();
+</script>
+</body>
+</html>

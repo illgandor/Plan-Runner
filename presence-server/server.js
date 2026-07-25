@@ -13,6 +13,7 @@ const MAX_AGE_MS = 900000;    // D-046: 3 missed idle beats (3 x 300s). Enforced
 const MAX_BODY = 64 * 1024;   // trust boundary: this port may be reachable, so bound the read.
 const MAX_ROWS = 500;         // D-049: history never expires by age — it is ROW-capped, oldest lastSeen out.
 const SAVE_MS = 500;          // heartbeats arrive in bursts; one debounced write per burst is plenty.
+const DASHBOARD = path.join(__dirname, 'dashboard.html');
 
 // History is best-effort: a missing, unreadable or corrupt file starts empty and NEVER stops the
 // server booting. Presence is advisory; losing last-seen is not worth a dead server.
@@ -126,10 +127,29 @@ function createServer({
       res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(body));
     };
     try {
-      if (!authed(req, token)) return send(401);          // 401 with no body, per §Presence.
-      const path = String(req.url || '/').split('?')[0];
+      const route = String(req.url || '/').split('?')[0];  // NB: never name this `path` — it shadows the module.
 
-      if (req.method === 'POST' && path === '/heartbeat') {
+      // §Dashboard auth split: `GET /` is the ONE unauthenticated route, and it is routed AHEAD of
+      // the check on purpose — a browser cannot attach a bearer header to its own document load.
+      // Safe because the page ships zero data: it asks the viewer for the token and fetches
+      // /projects itself. Its inline style+script are admitted by a per-response nonce, never by
+      // 'unsafe-inline'; a nonce fixed at boot would be no better than none.
+      if (req.method === 'GET' && route === '/') {
+        let html;
+        try { html = fs.readFileSync(DASHBOARD, 'utf8'); } catch { return send(500); }
+        const nonce = crypto.randomBytes(16).toString('base64');
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': `default-src 'none'; base-uri 'none'; connect-src 'self'; `
+            + `script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'`,
+          'cache-control': 'no-store',
+        }).end(html.split('%NONCE%').join(nonce));
+        return;
+      }
+
+      if (!authed(req, token)) return send(401);          // 401 with no body, per §Presence.
+
+      if (req.method === 'POST' && route === '/heartbeat') {
         let body;
         try { body = JSON.parse(await readBody(req)); } catch { return send(400); }
         if (!valid(body)) return send(400);
@@ -155,9 +175,9 @@ function createServer({
         return send(204);
       }
 
-      if (req.method === 'GET' && path.startsWith('/presence/')) {
+      if (req.method === 'GET' && route.startsWith('/presence/')) {
         let project;
-        try { project = decodeURIComponent(path.slice('/presence/'.length)); } catch { return send(400); }
+        try { project = decodeURIComponent(route.slice('/presence/'.length)); } catch { return send(400); }
         // Unknown project is [], never 404 — absence is an empty array. We do not know who is asking,
         // so the caller filters itself out by `user`.
         return send(200, { peers: livePeers(projects.get(project), now() - MAX_AGE_MS) });
@@ -165,7 +185,7 @@ function createServer({
 
       // §Dashboard GET /projects — every KNOWN project (history ∪ live), its live peers and its
       // history rows. Nobody is filtered out of `peers`: the dashboard has no caller identity.
-      if (req.method === 'GET' && path === '/projects') {
+      if (req.method === 'GET' && route === '/projects') {
         const cutoff = now() - MAX_AGE_MS;
         const out = [];
         for (const project of new Set([...seen.keys(), ...projects.keys()])) {
