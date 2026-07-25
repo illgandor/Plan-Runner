@@ -5,6 +5,7 @@ out/
 .DS_Store
 .plan-runner/
 .claude/
+presence-server/presence-state.json*
 
 # Vendored standalone Plan Runner — reference only, never shipped/committed
 /reference/

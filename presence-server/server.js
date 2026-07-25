@@ -1,12 +1,63 @@
-// Presence server (P10-S07). The spec is planning/reference/CONTRACTS.md §Presence — this file
-// implements it and nothing else. Node stdlib `http` only: no framework, no database, no deps.
-// State is one in-memory Map; a restart forgets everything, which is the contract (D-046).
+// Presence server (P10-S07). The spec is planning/reference/CONTRACTS.md §Presence + §Dashboard —
+// this file implements it and nothing else. Node stdlib only: no framework, no database, no deps.
+// TWO stores that never mix (D-047/D-048): LIVE presence is one in-memory Map that a restart
+// forgets, and HISTORY ("was here") is a row-capped JSON file that survives one. Nothing may read
+// history to decide who is live.
 'use strict';
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const MAX_AGE_MS = 900000;    // D-046: 3 missed idle beats (3 x 300s). Enforced on READ, no sweep timer.
 const MAX_BODY = 64 * 1024;   // trust boundary: this port may be reachable, so bound the read.
+const MAX_ROWS = 500;         // D-049: history never expires by age — it is ROW-capped, oldest lastSeen out.
+const SAVE_MS = 500;          // heartbeats arrive in bursts; one debounced write per burst is plenty.
+
+// History is best-effort: a missing, unreadable or corrupt file starts empty and NEVER stops the
+// server booting. Presence is advisory; losing last-seen is not worth a dead server.
+function loadSeen(file) {
+  const seen = new Map();
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return seen; }
+  if (!raw || typeof raw !== 'object') return seen;
+  for (const [project, users] of Object.entries(raw)) {
+    if (!users || typeof users !== 'object') continue;
+    const rows = new Map();
+    for (const [user, r] of Object.entries(users)) {
+      if (!r || typeof r.lastSeen !== 'number') continue;
+      rows.set(user, {
+        lastSeen: r.lastSeen,
+        lastRunning: typeof r.lastRunning === 'number' ? r.lastRunning : null,
+        step: typeof r.step === 'string' ? r.step : null,
+      });
+    }
+    if (rows.size) seen.set(project, rows);
+  }
+  return seen;
+}
+
+// Temp file + rename: a power cut mid-write leaves the old file intact, never a truncated one.
+function saveSeen(file, seen) {
+  const out = {};
+  for (const [project, rows] of seen) out[project] = Object.fromEntries(rows);
+  try {
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(out));
+    fs.renameSync(`${file}.tmp`, file);
+  } catch { /* best-effort: an unwritable state path must not break presence */ }
+}
+
+function evict(seen, maxRows) {
+  const rows = [];
+  for (const [project, users] of seen) for (const [user, rec] of users) rows.push([project, user, rec.lastSeen]);
+  if (rows.length <= maxRows) return;
+  rows.sort((a, b) => a[2] - b[2]);
+  for (const [project, user] of rows.slice(0, rows.length - maxRows)) {
+    const users = seen.get(project);
+    users.delete(user);
+    if (!users.size) seen.delete(project);
+  }
+}
 
 // Constant-time bearer compare — one shared token per deployment (D-045), never logged.
 function authed(req, token) {
@@ -38,8 +89,21 @@ function valid(b) {
     && (b.state === 'running' || b.state === 'idle');
 }
 
-function createServer({ token, now = Date.now } = {}) {
-  const projects = new Map(); // project -> Map(user -> {user, step, state, ts})
+function createServer({
+  token,
+  now = Date.now,
+  statePath = process.env.PRESENCE_STATE || path.join(__dirname, 'presence-state.json'),
+  maxRows = MAX_ROWS,
+  saveMs = SAVE_MS,
+} = {}) {
+  const projects = new Map(); // LIVE  — project -> Map(user -> {user, step, state, ts}). Never persisted.
+  const seen = loadSeen(statePath); // HISTORY — project -> Map(user -> {lastSeen, lastRunning, step}).
+  let saveTimer = null;
+  const scheduleSave = () => {
+    if (saveTimer) return;
+    saveTimer = setTimeout(() => { saveTimer = null; saveSeen(statePath, seen); }, saveMs);
+    saveTimer.unref?.();          // a pending write must never hold the process open.
+  };
 
   return http.createServer(async (req, res) => {
     // Writing to a socket we already tore down (the over-long-body path destroys it) throws, and
@@ -61,7 +125,22 @@ function createServer({ token, now = Date.now } = {}) {
         let users = projects.get(body.project);
         if (!users) projects.set(body.project, (users = new Map()));
         // The server timestamps authoritatively; the client's advisory `ts` is discarded.
-        users.set(body.user, { user: body.user, step: body.step ?? null, state: body.state, ts: now() });
+        const ts = now();
+        users.set(body.user, { user: body.user, step: body.step ?? null, state: body.state, ts });
+
+        // HISTORY: lastSeen tracks any beat; lastRunning and `step` only advance on a RUNNING one,
+        // so a row reads "last working on P11-S02", not whatever idle beat happened to land last.
+        let rows = seen.get(body.project);
+        if (!rows) seen.set(body.project, (rows = new Map()));
+        const prev = rows.get(body.user);
+        const running = body.state === 'running';
+        rows.set(body.user, {
+          lastSeen: ts,
+          lastRunning: running ? ts : (prev ? prev.lastRunning : null),
+          step: running ? (body.step ?? null) : (prev ? prev.step : null),
+        });
+        evict(seen, maxRows);
+        scheduleSave();
         return send(204);
       }
 
@@ -98,4 +177,4 @@ if (require.main === module) {
   createServer({ token }).listen(port, () => console.log(`presence server listening on :${port}`));
 }
 
-module.exports = { createServer, MAX_AGE_MS };
+module.exports = { createServer, loadSeen, MAX_AGE_MS, MAX_ROWS };

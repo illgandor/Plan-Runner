@@ -4,14 +4,31 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
 const { execFileSync } = require('node:child_process');
-const { createServer, MAX_AGE_MS } = require('./server');
+const { createServer, loadSeen, MAX_AGE_MS } = require('./server');
 
 const TOKEN = 'test-token';
 const PROJECT = 'github.com/illgandor/plan-runner';
 
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-presence-'));
+let n = 0;
+const tmpState = () => path.join(TMP, `state-${n++}.json`);
+
+// The state write is debounced, so the file appears a beat after the request returns.
+async function waitFor(fn, ms = 2000) {
+  const stop = Date.now() + ms;
+  for (;;) {
+    try { const v = fn(); if (v) return v; } catch { /* not written yet */ }
+    if (Date.now() > stop) throw new Error('timed out waiting for the state file');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 async function start(opts = {}) {
-  const srv = createServer({ token: TOKEN, ...opts });
+  // Default every server to a throwaway state file — never the real one beside server.js.
+  const srv = createServer({ token: TOKEN, statePath: tmpState(), saveMs: 10, ...opts });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${srv.address().port}`;
   return {
@@ -101,6 +118,57 @@ test('an oversized body is rejected without killing the server', async () => {
     // Still serving: the process survived, and normal traffic is unaffected.
     assert.strictEqual((await s.beat({ project: PROJECT, user: 'Reno', step: null, state: 'idle' })).status, 204);
     assert.strictEqual((await s.peers()).status, 200);
+  } finally { await s.close(); }
+});
+
+// P11-S02 — HISTORY (D-048). Survives a restart; the LIVE map still does not (D-047).
+test('last-seen survives a restart, and an idle beat never clears lastRunning/step', async () => {
+  const statePath = tmpState();
+  const s1 = await start({ statePath, now: () => 1000 });
+  try {
+    await s1.beat({ project: PROJECT, user: 'Reno', step: 'P11-S02', state: 'running', ts: 5 });
+    await waitFor(() => fs.existsSync(statePath));
+  } finally { await s1.close(); }
+
+  // A FRESH server against the same file: the row is back, and a later idle beat only moves lastSeen.
+  const s2 = await start({ statePath, now: () => 2000 });
+  try {
+    assert.deepStrictEqual((await (await s2.peers()).json()).peers, []); // LIVE is still forgotten (D-047)
+    await s2.beat({ project: PROJECT, user: 'Reno', step: null, state: 'idle', ts: 9 });
+    const row = await waitFor(() => {
+      const r = loadSeen(statePath).get(PROJECT)?.get('Reno');
+      return r && r.lastSeen === 2000 ? r : null;
+    });
+    assert.deepStrictEqual(row, { lastSeen: 2000, lastRunning: 1000, step: 'P11-S02' });
+  } finally { await s2.close(); }
+});
+
+test('a corrupt state file yields an empty store and a server that still starts', async () => {
+  const statePath = tmpState();
+  fs.writeFileSync(statePath, '{"github.com/a/b": {"Reno": {"lastSeen"');   // truncated mid-write
+  const s = await start({ statePath, now: () => 7000 });
+  try {
+    assert.strictEqual(loadSeen(statePath).size, 0);
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Reno', step: null, state: 'idle' })).status, 204);
+    const state = await waitFor(() => loadSeen(statePath).get(PROJECT)?.get('Reno'));
+    assert.strictEqual(state.lastSeen, 7000);
+  } finally { await s.close(); }
+});
+
+test('past the row cap the oldest lastSeen is evicted and the newest survives', async () => {
+  const statePath = tmpState();
+  let now = 1000;
+  const s = await start({ statePath, maxRows: 2, now: () => now });
+  try {
+    for (const user of ['Oldest', 'Middle', 'Newest']) {
+      await s.beat({ project: PROJECT, user, step: null, state: 'idle' });
+      now += 1000;
+    }
+    const rows = await waitFor(() => {
+      const r = loadSeen(statePath).get(PROJECT);
+      return r && r.size === 2 ? r : null;
+    });
+    assert.deepStrictEqual([...rows.keys()], ['Middle', 'Newest']);
   } finally { await s.close(); }
 });
 

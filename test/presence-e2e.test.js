@@ -5,6 +5,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
+const path = require('node:path');
+const os = require('node:os');
 const { createServer, MAX_AGE_MS } = require('../presence-server/server');
 const { heartbeat, peers, startPresence } = require('../src/presence');
 
@@ -24,7 +26,9 @@ const reno = (url) => ({ settings: { url, token: TOKEN, name: 'Reno' }, exec: fa
 const tyler = (url) => ({ settings: { url, token: TOKEN, name: '' }, exec: fakeGit('Tyler') });
 
 async function listen(port = 0, now = Date.now) {
-  const srv = createServer({ token: TOKEN, now });
+  // P11-S02: history persists, so point it at a throwaway file — never the repo's real state.
+  const statePath = path.join(os.tmpdir(), `pr-e2e-state-${process.pid}.json`);
+  const srv = createServer({ token: TOKEN, now, statePath });
   await new Promise((r) => srv.listen(port, '127.0.0.1', r));
   return srv;
 }
