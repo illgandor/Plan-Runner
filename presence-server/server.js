@@ -59,6 +59,17 @@ function evict(seen, maxRows) {
   }
 }
 
+// ONE expiry rule shared by both read routes (D-046). Two copies of the 900s cutoff is how they
+// drift apart. Expiry is enforced on READ: stale records are dropped as we pass them.
+function livePeers(users, cutoff) {
+  const peers = [];
+  if (!users) return peers;
+  for (const [user, rec] of users) {
+    if (rec.ts < cutoff) users.delete(user); else peers.push(rec);
+  }
+  return peers;
+}
+
 // Constant-time bearer compare — one shared token per deployment (D-045), never logged.
 function authed(req, token) {
   const a = Buffer.from(String(req.headers.authorization || ''));
@@ -147,18 +158,27 @@ function createServer({
       if (req.method === 'GET' && path.startsWith('/presence/')) {
         let project;
         try { project = decodeURIComponent(path.slice('/presence/'.length)); } catch { return send(400); }
-        const users = projects.get(project);
-        const cutoff = now() - MAX_AGE_MS;
-        const peers = [];
-        // Expiry on read: stale records are dropped as we pass them, so the Map self-cleans.
-        if (users) {
-          for (const [user, rec] of users) {
-            if (rec.ts < cutoff) users.delete(user); else peers.push(rec);
-          }
-        }
         // Unknown project is [], never 404 — absence is an empty array. We do not know who is asking,
         // so the caller filters itself out by `user`.
-        return send(200, { peers });
+        return send(200, { peers: livePeers(projects.get(project), now() - MAX_AGE_MS) });
+      }
+
+      // §Dashboard GET /projects — every KNOWN project (history ∪ live), its live peers and its
+      // history rows. Nobody is filtered out of `peers`: the dashboard has no caller identity.
+      if (req.method === 'GET' && path === '/projects') {
+        const cutoff = now() - MAX_AGE_MS;
+        const out = [];
+        for (const project of new Set([...seen.keys(), ...projects.keys()])) {
+          const rows = seen.get(project);
+          const people = rows
+            ? [...rows].map(([user, r]) => ({ user, ...r })).sort((a, b) => b.lastSeen - a.lastSeen)
+            : [];
+          out.push({ project, reporters: people.length, peers: livePeers(projects.get(project), cutoff), people });
+        }
+        // D-050: multi-reporter projects first, then most recent activity (people[0] is the max) desc.
+        out.sort((a, b) => (b.reporters > 1) - (a.reporters > 1)
+          || (b.people[0]?.lastSeen ?? 0) - (a.people[0]?.lastSeen ?? 0));
+        return send(200, { projects: out });
       }
 
       send(404);

@@ -41,6 +41,7 @@ async function start(opts = {}) {
     }),
     peers: (project = PROJECT, token = TOKEN) => fetch(
       `${base}/presence/${encodeURIComponent(project)}`, { headers: { authorization: `Bearer ${token}` } }),
+    projects: (token = TOKEN) => fetch(`${base}/projects`, { headers: { authorization: `Bearer ${token}` } }),
   };
 }
 
@@ -169,6 +170,46 @@ test('past the row cap the oldest lastSeen is evicted and the newest survives', 
       return r && r.size === 2 ? r : null;
     });
     assert.deepStrictEqual([...rows.keys()], ['Middle', 'Newest']);
+  } finally { await s.close(); }
+});
+
+// P11-S03 — GET /projects (§Dashboard). Live and history joined, D-050 sort.
+test('GET /projects sorts multi-reporter projects first, then by most recent activity', async () => {
+  let now = 1000;
+  const s = await start({ now: () => now });
+  const SOLO = 'github.com/illgandor/solo';
+  try {
+    await s.beat({ project: PROJECT, user: 'Reno', step: 'P11-S03', state: 'running' });
+    now += 1000;
+    await s.beat({ project: PROJECT, user: 'Tyler', step: null, state: 'idle' });
+    now += 1000;
+    await s.beat({ project: SOLO, user: 'Tyler', step: null, state: 'idle' });  // newest, but 1 reporter
+
+    const res = await s.projects();
+    assert.strictEqual(res.status, 200);
+    const { projects } = await res.json();
+    assert.deepStrictEqual(projects.map((p) => p.project), [PROJECT, SOLO]);
+    assert.strictEqual(projects[0].reporters, 2);
+    assert.deepStrictEqual(projects[0].people.map((p) => p.user), ['Tyler', 'Reno']); // lastSeen desc
+    assert.deepStrictEqual(projects[0].people[1],
+      { user: 'Reno', lastSeen: 1000, lastRunning: 1000, step: 'P11-S03' });
+    assert.deepStrictEqual(projects[0].peers.map((p) => p.user).sort(), ['Reno', 'Tyler']);
+  } finally { await s.close(); }
+});
+
+test('an expired peer leaves /projects peers but stays in people; unknown = empty, no token = 401', async () => {
+  let now = 0;
+  const s = await start({ now: () => now });
+  try {
+    assert.deepStrictEqual(await (await s.projects()).json(), { projects: [] });  // nothing known yet
+    assert.strictEqual((await s.projects('wrong')).status, 401);
+
+    await s.beat({ project: PROJECT, user: 'Reno', step: 'P11-S03', state: 'running' });
+    now = MAX_AGE_MS + 1;
+    const [p] = (await (await s.projects()).json()).projects;
+    assert.deepStrictEqual(p.peers, []);
+    assert.deepStrictEqual(p.people, [{ user: 'Reno', lastSeen: 0, lastRunning: 0, step: 'P11-S03' }]);
+    assert.strictEqual(p.reporters, 1);
   } finally { await s.close(); }
 });
 
