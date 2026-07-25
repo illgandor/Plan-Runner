@@ -8,6 +8,8 @@ PLAN.md
 **/*.map
 # Planning system + vendored reference — never ship these in the .vsix
 planning/**
+# The presence server is a SEPARATE package you deploy yourself (D-041), never a client dependency.
+presence-server/**
 reference/**
 test/**
 scripts/**

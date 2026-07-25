@@ -1,0 +1,25 @@
+; systemd unit for the Plan Runner presence server.
+; Install:  sudo cp plan-runner-presence.service /etc/systemd/system/
+;           sudo systemctl daemon-reload && sudo systemctl enable --now plan-runner-presence
+; Edit User/WorkingDirectory/EnvironmentFile below to match where you cloned it.
+[Unit]
+Description=Plan Runner presence server (advisory who-is-on-this-project)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Plan-Runner/presence-server
+EnvironmentFile=/home/pi/Plan-Runner/presence-server/.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+; State is in-memory by design (D-046), so a restart simply forgets everyone. No data to protect.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
