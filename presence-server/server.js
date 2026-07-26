@@ -287,7 +287,14 @@ function createServer({
         // D-050: multi-reporter projects first, then most recent activity (people[0] is the max) desc.
         out.sort((a, b) => (b.reporters > 1) - (a.reporters > 1)
           || (b.people[0]?.lastSeen ?? 0) - (a.people[0]?.lastSeen ?? 0));
-        return send(200, { projects: out });
+        // §Account usage: TOP-LEVEL, not nested under a project — /usage is account-wide, and a
+        // copy per project is two copies of one fact. `stale` is the READING's age, not the
+        // report's: a live window whose meter has been erroring for an hour is stale too (D-055).
+        // Nothing is dropped here — a stale row keeps its last good numbers and says so.
+        const usage = [...users].map(([user, r]) => ({
+          user, ...r, stale: r.checkedAt == null || r.checkedAt < cutoff,
+        })).sort((a, b) => b.ts - a.ts);
+        return send(200, { projects: out, users: usage });
       }
 
       send(404);

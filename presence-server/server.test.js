@@ -320,7 +320,8 @@ test('an expired peer leaves /projects peers but stays in people; unknown = empt
   let now = 0;
   const s = await start({ now: () => now });
   try {
-    assert.deepStrictEqual(await (await s.projects()).json(), { projects: [] });  // nothing known yet
+    // Nothing known yet. `users` joined the envelope in P12-S03; the ARRAYS are what's asserted.
+    assert.deepStrictEqual(await (await s.projects()).json(), { projects: [], users: [] });
     assert.strictEqual((await s.projects('wrong')).status, 401);
 
     await s.beat({ project: PROJECT, user: 'Reno', step: 'P11-S03', state: 'running' });
@@ -333,6 +334,48 @@ test('an expired peer leaves /projects peers but stays in people; unknown = empt
 });
 
 // P11-S04 — the dashboard document. `GET /` is the ONLY unauthenticated route (§Dashboard auth split).
+// P12-S03 — the top-level `users` key. Sorted by ts desc; stale is the READING's age (D-055).
+test('GET /projects carries both usage rows, newest first, with nulls kept as null', async () => {
+  let now = 1000;
+  const s = await start({ now: () => now });
+  try {
+    await s.usage({ user: 'Reno', session: 42, week: 17, threshold: 90, checkedAgeMs: 0 });
+    now += 1000;
+    await s.usage({ user: 'Tyler', session: null, week: 8, threshold: 80, checkedAgeMs: 0 });
+
+    const { projects, users } = await (await s.projects()).json();
+    assert.deepStrictEqual(projects, []);                       // usage never invents a project
+    assert.deepStrictEqual(users, [
+      { user: 'Tyler', session: null, week: 8, threshold: 80, ts: 2000, checkedAt: 2000, stale: false },
+      { user: 'Reno', session: 42, week: 17, threshold: 90, ts: 1000, checkedAt: 1000, stale: false },
+    ]);
+    assert.strictEqual(users[0].session, null);                 // null is "not known", never 0
+  } finally { await s.close(); }
+});
+
+test('a reading older than MAX_AGE_MS is stale but KEEPS its numbers, even from a live window', async () => {
+  let now = 1000;
+  const s = await start({ now: () => now });
+  try {
+    // The window is alive and reporting RIGHT NOW — its meter has just been broken for a while.
+    await s.usage({ user: 'Reno', session: 42, week: 17, threshold: 90, checkedAgeMs: MAX_AGE_MS + 1 });
+    await s.usage({ user: 'Tyler', session: 5, week: 5, threshold: 90 });   // never had a reading time
+    const { users } = await (await s.projects()).json();
+    const by = Object.fromEntries(users.map((u) => [u.user, u]));
+    assert.strictEqual(by.Reno.stale, true);
+    assert.strictEqual(by.Reno.session, 42);                    // last good reading survives (D-055)
+    assert.strictEqual(by.Reno.ts, 1000);                       // …and the report itself was fresh
+    assert.strictEqual(by.Tyler.stale, true);                   // no checkedAt at all = stale
+
+    // 900s later nobody has reported again: both rows are still there, still carrying their numbers.
+    now += MAX_AGE_MS + 1;
+    const later = (await (await s.projects()).json()).users;
+    assert.strictEqual(later.length, 2);
+    assert.strictEqual(later.every((u) => u.stale), true);
+    assert.strictEqual(later.find((u) => u.user === 'Reno').session, 42);
+  } finally { await s.close(); }
+});
+
 test('GET / serves the page unauthenticated with a fresh nonce, while data stays bearer-only', async () => {
   const s = await start();
   try {
