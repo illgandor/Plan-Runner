@@ -1,8 +1,9 @@
-// Presence server (P10-S07). The spec is planning/reference/CONTRACTS.md §Presence + §Dashboard —
-// this file implements it and nothing else. Node stdlib only: no framework, no database, no deps.
-// TWO stores that never mix (D-047/D-048): LIVE presence is one in-memory Map that a restart
-// forgets, and HISTORY ("was here") is a row-capped JSON file that survives one. Nothing may read
-// history to decide who is live.
+// Presence server (P10-S07). The spec is planning/reference/CONTRACTS.md §Presence + §Dashboard +
+// §Account usage — this file implements it and nothing else. Node stdlib only: no framework, no
+// database, no deps. THREE stores that never mix: LIVE presence is one in-memory Map that a restart
+// forgets; HISTORY ("was here") is a row-capped JSON file that survives one (D-047/D-048); USAGE is
+// keyed by USER, not project, because /usage is account-wide (D-052). Nothing may read history or
+// usage to decide who is live.
 'use strict';
 const http = require('http');
 const crypto = require('crypto');
@@ -13,15 +14,25 @@ const MAX_AGE_MS = 900000;    // D-046: 3 missed idle beats (3 x 300s). Enforced
 const MAX_BODY = 64 * 1024;   // trust boundary: this port may be reachable, so bound the read.
 const MAX_FIELD = 256;        // …and bound each FIELD: MAX_BODY alone let one 64KB name reach disk.
 const MAX_ROWS = 500;         // D-049: history never expires by age — it is ROW-capped, oldest lastSeen out.
+const MAX_USERS = 50;         // D-054: same idea for usage. Two people need two; 50 is a bound, not a limit.
 const SAVE_MS = 500;          // heartbeats arrive in bursts; one debounced write per burst is plenty.
 const DASHBOARD = path.join(__dirname, 'dashboard.html');
+
+// The state file is `{projects:{…}, users:{…}}`. A document with NO `projects` key is the
+// pre-PLAN-12 format — the bare projects map — and loads with an empty usage store. A project id
+// always contains a `/` (§Presence D-040), so neither envelope key can ever collide with one.
+function loadState(file) {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+  if (!raw || typeof raw !== 'object') return {};
+  return raw.projects && typeof raw.projects === 'object' ? raw : { projects: raw };
+}
 
 // History is best-effort: a missing, unreadable or corrupt file starts empty and NEVER stops the
 // server booting. Presence is advisory; losing last-seen is not worth a dead server.
 function loadSeen(file) {
   const seen = new Map();
-  let raw;
-  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return seen; }
+  const raw = loadState(file).projects;
   if (!raw || typeof raw !== 'object') return seen;
   for (const [project, users] of Object.entries(raw)) {
     if (!users || typeof users !== 'object') continue;
@@ -39,12 +50,28 @@ function loadSeen(file) {
   return seen;
 }
 
+// §Account usage store: keyed by USER, flat, never by project (D-052). Same best-effort rule.
+function loadUsers(file) {
+  const users = new Map();
+  const raw = loadState(file).users;
+  if (!raw || typeof raw !== 'object') return users;
+  for (const [user, r] of Object.entries(raw)) {
+    if (!r || typeof r.ts !== 'number') continue;
+    const pct = (v) => (typeof v === 'number' ? v : null);
+    users.set(user, {
+      session: pct(r.session), week: pct(r.week), threshold: pct(r.threshold),
+      ts: r.ts, checkedAt: typeof r.checkedAt === 'number' ? r.checkedAt : null,
+    });
+  }
+  return users;
+}
+
 // Temp file + rename: a power cut mid-write leaves the old file intact, never a truncated one.
-function saveSeen(file, seen) {
-  const out = {};
-  for (const [project, rows] of seen) out[project] = Object.fromEntries(rows);
+function saveState(file, seen, users) {
+  const projects = {};
+  for (const [project, rows] of seen) projects[project] = Object.fromEntries(rows);
   try {
-    fs.writeFileSync(`${file}.tmp`, JSON.stringify(out));
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ projects, users: Object.fromEntries(users) }));
     fs.renameSync(`${file}.tmp`, file);
   } catch { /* best-effort: an unwritable state path must not break presence */ }
 }
@@ -59,6 +86,14 @@ function evict(seen, maxRows) {
     users.delete(user);
     if (!users.size) seen.delete(project);
   }
+}
+
+// D-054: the usage store is bounded the same way history is — by ROWS, never by age. A row that
+// is gone was evicted by the cap; nothing here ever expires (D-055 keeps stale readings visible).
+function evictUsers(users, maxUsers) {
+  if (users.size <= maxUsers) return;
+  const rows = [...users].sort((a, b) => a[1].ts - b[1].ts);
+  for (const [user] of rows.slice(0, users.size - maxUsers)) users.delete(user);
 }
 
 // ONE expiry rule shared by both read routes (D-046). Two copies of the 900s cutoff is how they
@@ -116,19 +151,35 @@ function valid(b) {
     && (b.state === 'running' || b.state === 'idle');
 }
 
+// §Account usage POST body. A percentage is 0–100 or null — null means "not known", and it stays
+// null all the way to the page, because a zero bar reads as headroom that does not exist.
+const pct = (v) => v === null || v === undefined
+  || (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100);
+function validUsage(b) {
+  return !!b && typeof b === 'object' && str(b.user)
+    && pct(b.session) && pct(b.week) && pct(b.threshold)
+    // Elapsed ms since the reading, NOT a timestamp — the server owns the clock (§Account usage).
+    && (b.checkedAgeMs === null || b.checkedAgeMs === undefined
+      || (typeof b.checkedAgeMs === 'number' && Number.isFinite(b.checkedAgeMs) && b.checkedAgeMs >= 0))
+    // Both null is nothing to record; storing it would render as a person with no headroom.
+    && !(b.session == null && b.week == null);
+}
+
 function createServer({
   token,
   now = Date.now,
   statePath = process.env.PRESENCE_STATE || path.join(__dirname, 'presence-state.json'),
   maxRows = MAX_ROWS,
+  maxUsers = MAX_USERS,
   saveMs = SAVE_MS,
 } = {}) {
   const projects = new Map(); // LIVE  — project -> Map(user -> {user, step, state, ts}). Never persisted.
   const seen = loadSeen(statePath); // HISTORY — project -> Map(user -> {lastSeen, lastRunning, step}).
+  const users = loadUsers(statePath); // USAGE — user -> {session, week, threshold, ts, checkedAt}.
   let saveTimer = null;
   const scheduleSave = () => {
     if (saveTimer) return;
-    saveTimer = setTimeout(() => { saveTimer = null; saveSeen(statePath, seen); }, saveMs);
+    saveTimer = setTimeout(() => { saveTimer = null; saveState(statePath, seen, users); }, saveMs);
     saveTimer.unref?.();          // a pending write must never hold the process open.
   };
 
@@ -192,6 +243,27 @@ function createServer({
         return send(204);
       }
 
+      // §Account usage POST /usage — account-scoped, so its own route rather than a wider
+      // heartbeat (D-052): §Presence's two endpoints stay frozen byte for byte.
+      if (req.method === 'POST' && route === '/usage') {
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { return send(400); }
+        if (!validUsage(body)) return send(400);
+        const ts = now();
+        users.set(body.user, {
+          session: body.session ?? null,
+          week: body.week ?? null,
+          threshold: body.threshold ?? null,
+          ts,
+          // The client sends ELAPSED ms, so the reading lands in the SERVER's frame and no client
+          // wall clock is ever compared against ours (same reason the heartbeat's `ts` is discarded).
+          checkedAt: body.checkedAgeMs == null ? null : ts - body.checkedAgeMs,
+        });
+        evictUsers(users, maxUsers);
+        scheduleSave();
+        return send(204);
+      }
+
       if (req.method === 'GET' && route.startsWith('/presence/')) {
         let project;
         try { project = decodeURIComponent(route.slice('/presence/'.length)); } catch { return send(400); }
@@ -234,4 +306,4 @@ if (require.main === module) {
   createServer({ token }).listen(port, () => console.log(`presence server listening on :${port}`));
 }
 
-module.exports = { createServer, loadSeen, MAX_AGE_MS, MAX_ROWS };
+module.exports = { createServer, loadSeen, loadUsers, MAX_AGE_MS, MAX_ROWS, MAX_USERS };

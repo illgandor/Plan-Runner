@@ -7,7 +7,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
-const { createServer, loadSeen, MAX_AGE_MS } = require('./server');
+const { createServer, loadSeen, loadUsers, MAX_AGE_MS } = require('./server');
 
 const TOKEN = 'test-token';
 const PROJECT = 'github.com/illgandor/plan-runner';
@@ -42,6 +42,11 @@ async function start(opts = {}) {
     peers: (project = PROJECT, token = TOKEN) => fetch(
       `${base}/presence/${encodeURIComponent(project)}`, { headers: { authorization: `Bearer ${token}` } }),
     projects: (token = TOKEN) => fetch(`${base}/projects`, { headers: { authorization: `Bearer ${token}` } }),
+    usage: (body, token = TOKEN) => fetch(`${base}/usage`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    }),
   };
 }
 
@@ -206,6 +211,82 @@ test('past the row cap the oldest lastSeen is evicted and the newest survives', 
     const rows = await waitFor(() => {
       const r = loadSeen(statePath).get(PROJECT);
       return r && r.size === 2 ? r : null;
+    });
+    assert.deepStrictEqual([...rows.keys()], ['Middle', 'Newest']);
+  } finally { await s.close(); }
+});
+
+// P12-S02 — §Account usage. A THIRD store, keyed by USER, persisted beside history (D-052/D-054).
+test('a usage report survives a restart, and checkedAgeMs lands in the SERVER clock', async () => {
+  const statePath = tmpState();
+  const s1 = await start({ statePath, now: () => 50000 });
+  try {
+    const post = await s1.usage({ user: 'Reno', session: 42, week: 17, threshold: 90, checkedAgeMs: 5000 });
+    assert.strictEqual(post.status, 204);
+    assert.strictEqual(await post.text(), '');
+    await waitFor(() => fs.existsSync(statePath));
+  } finally { await s1.close(); }
+
+  const row = loadUsers(statePath).get('Reno');
+  // checkedAt is derived server-side: arrival 50000 minus 5000 elapsed. No client wall clock crosses.
+  assert.deepStrictEqual(row, { session: 42, week: 17, threshold: 90, ts: 50000, checkedAt: 45000 });
+
+  // A fresh server against the same file still has it — and history is untouched by any of this.
+  const s2 = await start({ statePath, now: () => 60000 });
+  try {
+    await s2.beat({ project: PROJECT, user: 'Reno', step: null, state: 'idle' });
+    await waitFor(() => loadSeen(statePath).get(PROJECT)?.get('Reno'));
+    assert.strictEqual(loadUsers(statePath).get('Reno').session, 42);
+  } finally { await s2.close(); }
+});
+
+test('a pre-PLAN-12 state file loads its history and yields an empty usage store', async () => {
+  const statePath = tmpState();
+  fs.writeFileSync(statePath, JSON.stringify({ [PROJECT]: { Reno: { lastSeen: 10, lastRunning: 10, step: 'P11-S02' } } }));
+  assert.strictEqual(loadSeen(statePath).get(PROJECT).get('Reno').step, 'P11-S02');
+  assert.strictEqual(loadUsers(statePath).size, 0);
+  const s = await start({ statePath, now: () => 70000 });
+  try {
+    assert.strictEqual((await s.usage({ user: 'Tyler', session: 5, week: null })).status, 204);
+    const row = await waitFor(() => loadUsers(statePath).get('Tyler'));
+    assert.deepStrictEqual(row, { session: 5, week: null, threshold: null, ts: 70000, checkedAt: null });
+    assert.strictEqual(loadSeen(statePath).get(PROJECT).get('Reno').step, 'P11-S02'); // migrated, not lost
+  } finally { await s.close(); }
+});
+
+test('a half-formed usage report is 400 and stores nothing', async () => {
+  const statePath = tmpState();
+  const s = await start({ statePath });
+  try {
+    for (const body of [
+      { user: 'Reno', session: null, week: null },              // nothing to record
+      { user: 'Reno', session: '42', week: null },              // not a number
+      { user: 'Reno', session: 101, week: null },               // out of range
+      { user: 'Reno', session: -1, week: null },
+      { user: 'Reno', session: 42, week: null, threshold: 900 },
+      { user: 'Reno', session: 42, week: null, checkedAgeMs: -1 },
+      { user: 'R'.repeat(257), session: 42, week: null },       // MAX_FIELD
+      { session: 42, week: null },                              // no user
+      'not json',
+    ]) assert.strictEqual((await s.usage(body)).status, 400, JSON.stringify(body));
+    assert.strictEqual((await s.usage({ user: 'Reno', session: 42, week: null }, 'wrong')).status, 401);
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(fs.existsSync(statePath), false);        // nothing was ever written
+  } finally { await s.close(); }
+});
+
+test('past the usage cap the oldest report is evicted and the newest survives', async () => {
+  const statePath = tmpState();
+  let now = 1000;
+  const s = await start({ statePath, maxUsers: 2, now: () => now });
+  try {
+    for (const user of ['Oldest', 'Middle', 'Newest']) {
+      await s.usage({ user, session: 1, week: 1 });
+      now += 1000;
+    }
+    const rows = await waitFor(() => {
+      const u = loadUsers(statePath);
+      return u.size === 2 ? u : null;
     });
     assert.deepStrictEqual([...rows.keys()], ['Middle', 'Newest']);
   } finally { await s.close(); }
