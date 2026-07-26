@@ -11,6 +11,7 @@ const path = require('path');
 
 const MAX_AGE_MS = 900000;    // D-046: 3 missed idle beats (3 x 300s). Enforced on READ, no sweep timer.
 const MAX_BODY = 64 * 1024;   // trust boundary: this port may be reachable, so bound the read.
+const MAX_FIELD = 256;        // …and bound each FIELD: MAX_BODY alone let one 64KB name reach disk.
 const MAX_ROWS = 500;         // D-049: history never expires by age — it is ROW-capped, oldest lastSeen out.
 const SAVE_MS = 500;          // heartbeats arrive in bursts; one debounced write per burst is plenty.
 const DASHBOARD = path.join(__dirname, 'dashboard.html');
@@ -71,6 +72,17 @@ function livePeers(users, cutoff) {
   return peers;
 }
 
+// MAX_ROWS bounds HISTORY; nothing bounded the LIVE map, and read-time expiry only ever cleaned
+// projects somebody happened to GET. So a project nobody reads — or a token holder POSTing junk
+// project names — grew memory forever. Same 900s rule, still no timer.
+// ponytail: O(live rows) per beat. Fine at hundreds; bucket by expiry if it ever reaches millions.
+function sweepLive(projects, cutoff) {
+  for (const [project, users] of projects) {
+    livePeers(users, cutoff);
+    if (!users.size) projects.delete(project);
+  }
+}
+
 // Constant-time bearer compare — one shared token per deployment (D-045), never logged.
 function authed(req, token) {
   const a = Buffer.from(String(req.headers.authorization || ''));
@@ -93,11 +105,14 @@ function readBody(req) {
 }
 
 // §Presence POST body shape. Anything else is a 400 — we never store a half-formed record.
+// Every string is length-bounded: a real id is `host/owner/repo` and a real step is a short label,
+// so MAX_FIELD is orders of magnitude of headroom, and without it MAX_BODY allowed a 64KB name
+// straight into the state file and onto the dashboard.
+const str = (v, min = 1) => typeof v === 'string' && v.length >= min && v.length <= MAX_FIELD;
 function valid(b) {
   return !!b && typeof b === 'object'
-    && typeof b.project === 'string' && b.project !== ''
-    && typeof b.user === 'string' && b.user !== ''
-    && (b.step === null || b.step === undefined || typeof b.step === 'string')
+    && str(b.project) && str(b.user)
+    && (b.step === null || b.step === undefined || str(b.step, 0))
     && (b.state === 'running' || b.state === 'idle');
 }
 
@@ -140,8 +155,9 @@ function createServer({
         const nonce = crypto.randomBytes(16).toString('base64');
         res.writeHead(200, {
           'content-type': 'text/html; charset=utf-8',
-          'content-security-policy': `default-src 'none'; base-uri 'none'; connect-src 'self'; `
-            + `script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'`,
+          // frame-ancestors is NOT covered by default-src — without it this page can be framed.
+          'content-security-policy': `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; `
+            + `connect-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'`,
           'cache-control': 'no-store',
         }).end(html.split('%NONCE%').join(nonce));
         return;
@@ -171,6 +187,7 @@ function createServer({
           step: running ? (body.step ?? null) : (prev ? prev.step : null),
         });
         evict(seen, maxRows);
+        sweepLive(projects, ts - MAX_AGE_MS);   // bound the live map too, not just history
         scheduleSave();
         return send(204);
       }

@@ -1,5 +1,6 @@
-// projectId/normalizeRemote give the same id for every spelling of one remote, and null when
-// there is no remote — the first "stay dark" condition for presence. (P10-S02, CONTRACTS §Presence)
+// projectId/normalizeRemote give the same id for every spelling of one remote, a `local/` id for a
+// repo with no remote (A-P10-08), and null only when there is no repo at all — the first "stay
+// dark" condition for presence. (P10-S02, CONTRACTS §Presence)
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -44,6 +45,23 @@ test('projectId returns null when git itself fails', () => {
 test('projectId normalizes what git prints, newline and all', () => {
   const exec = () => 'git@github.com:illgandor/Plan-Runner.git\n';
   assert.strictEqual(projectId('.', { exec }), 'github.com/illgandor/plan-runner');
+});
+
+// A-P10-08. A repo with no origin used to be indistinguishable from "not a repo": presence went
+// dark and the project silently never appeared on the dashboard. It now reports under `local/<dir>`.
+test('a git repo with NO origin reports as local/<repo-root-name>, not null', () => {
+  const exec = (_bin, args) => {
+    if (args[0] === 'remote') throw new Error("error: No such remote 'origin'");
+    return 'C:/Users/dtyle/Desktop/Not a Cult LLC/projects/Security Cameras\n';
+  };
+  assert.strictEqual(projectId('.', { exec }), 'local/security cameras');
+});
+
+test('the local fallback never spawns rev-parse when an origin exists', () => {
+  const calls = [];
+  const exec = (_bin, args) => { calls.push(args[0]); return 'git@github.com:a/b.git'; };
+  assert.strictEqual(projectId('.', { exec }), 'github.com/a/b');
+  assert.deepStrictEqual(calls, ['remote'], 'one git call on the happy path, as before');
 });
 
 // P10-S03: the on/off switch. Dark unless BOTH url and token are set (D-039) — this is the guard

@@ -122,6 +122,44 @@ test('an oversized body is rejected without killing the server', async () => {
   } finally { await s.close(); }
 });
 
+// S0118 audit. MAX_BODY bounded the REQUEST but not the fields, so one authenticated beat could
+// push a 64KB user name into the state file and onto the dashboard forever.
+test('an over-long project/user/step field is 400 and stores nothing', async () => {
+  const s = await start();
+  try {
+    const long = 'X'.repeat(257);
+    assert.strictEqual((await s.beat({ project: long, user: 'Reno', state: 'idle' })).status, 400);
+    assert.strictEqual((await s.beat({ project: PROJECT, user: long, state: 'idle' })).status, 400);
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Reno', step: long, state: 'idle' })).status, 400);
+    assert.deepStrictEqual((await (await s.projects()).json()).projects, []);
+
+    // 256 is the bound, not the wall: a realistic step label still gets through.
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Reno',
+      step: 'P01-S26b — Owner: send a real sample to a real printer (👤 owner-gated)', state: 'running' })).status, 204);
+  } finally { await s.close(); }
+});
+
+// S0118 audit. The row cap bounded HISTORY only. LIVE was swept solely by read-time expiry, so a
+// project nobody GETs — or junk project names from a token holder — grew memory with no ceiling.
+test('the live map is swept on heartbeat, not only when someone reads that project', async () => {
+  let now = 1000;
+  const s = await start({ now: () => now, maxRows: 500 });
+  const GHOST = 'github.com/illgandor/ghost';
+  try {
+    await s.beat({ project: GHOST, user: 'Reno', step: null, state: 'idle' });
+    now += MAX_AGE_MS + 1;
+    // A beat on a DIFFERENT project: nothing ever reads GHOST, yet its live row must be gone.
+    await s.beat({ project: PROJECT, user: 'Tyler', step: null, state: 'idle' });
+
+    const { projects } = await (await s.projects()).json();
+    const ghost = projects.find((p) => p.project === GHOST);
+    assert.deepStrictEqual(ghost.peers, [], 'expired live row swept');
+    assert.strictEqual(ghost.people.length, 1, 'history is untouched — it never expires by age (D-049)');
+    // The fresh beat is not swept by its own sweep.
+    assert.strictEqual(projects.find((p) => p.project === PROJECT).peers.length, 1);
+  } finally { await s.close(); }
+});
+
 // P11-S02 — HISTORY (D-048). Survives a restart; the LIVE map still does not (D-047).
 test('last-seen survives a restart, and an idle beat never clears lastRunning/step', async () => {
   const statePath = tmpState();
@@ -222,6 +260,7 @@ test('GET / serves the page unauthenticated with a fresh nonce, while data stays
     assert.match(res.headers.get('content-type'), /^text\/html/);
     const csp = res.headers.get('content-security-policy');
     assert.match(csp, /default-src 'none'/);
+    assert.match(csp, /frame-ancestors 'none'/);   // default-src does NOT cover framing
     const nonce = /script-src 'nonce-([^']+)'/.exec(csp)[1];
     const html = await res.text();
     assert.ok(html.includes(`nonce="${nonce}"`), 'the served page carries this response\'s nonce');

@@ -113,9 +113,12 @@ In VS Code settings (or the panel's ⚙ settings), on **every** machine that sho
 | `planRunner.presenceToken` | the same token from `.env` |
 | `planRunner.presenceName` | your display name (optional; defaults to `git config user.name`) |
 
-Presence stays dark until *both* the URL and the token are set, and the project must have a git
-`origin` remote — the project identity is the normalized remote URL, so two clones on different
-machines agree about which project they are on. No remote, no presence.
+Presence stays dark until *both* the URL and the token are set, and the folder must be a git repo.
+The project identity is the normalized `origin` remote (`github.com/owner/repo`), so two clones on
+different machines agree about which project they are on. A repo with **no remote** reports as
+`local/<folder-name>` instead of going dark — it can never be a shared id, so two remote-less repos
+that share a folder name merge into one row. Give one of them a remote if that ever matters.
+No git repo at all, no presence.
 
 ## Reaching it from outside the LAN
 
@@ -137,8 +140,12 @@ token away. Keep the port on the private network.
 ## Troubleshooting
 
 **The light never appears in the panel.** Presence is dark unless it is fully configured. Check,
-in this order: both `presenceUrl` and `presenceToken` are set; `git remote get-url origin`
-returns something in the repo you have open; the panel is visible (hidden panels stop polling).
+in this order: both `presenceUrl` and `presenceToken` are set; `git rev-parse --show-toplevel`
+returns something in the folder you have open; the panel is visible (hidden panels stop polling).
+
+**A project I worked on is missing from the dashboard.** It reports only while the Plan Runner
+panel is *visible* in that window, and only from a git repo. Before v0.2.13 a repo with no `origin`
+remote was silently dark — that was the usual cause, and it now reports as `local/<folder-name>`.
 
 **It says "unavailable".** The client reached nothing. `curl -s -o /dev/null -w '%{http_code}'
 -H "Authorization: Bearer $PRESENCE_TOKEN" http://your-host:8787/presence/x` should print `200`.

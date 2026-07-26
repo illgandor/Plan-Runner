@@ -68,10 +68,17 @@ function render(projects) {
   var cutoff = Date.now() - WINDOW_MS, shown = 0;
   projects.forEach(function (p) {                    // already sorted by the server (D-050)
     var people = showAll ? p.people : p.people.filter(function (r) { return r.lastSeen >= cutoff; });
-    if (!people.length) return;
-    shown++;
     var live = {};
     p.peers.forEach(function (x) { live[x.user] = x; });
+    // Somebody LIVE must always render, even with no history row — the row cap evicts history but
+    // never the live map, so filtering on history alone could print "nothing known" mid-run.
+    var have = {};
+    people.forEach(function (r) { have[r.user] = 1; });
+    p.peers.forEach(function (x) {
+      if (!have[x.user]) people = people.concat([{ user: x.user, lastSeen: x.ts, step: x.step }]);
+    });
+    if (!people.length) return;
+    shown++;
     var box = el('section', null, 'proj');
     box.appendChild(el('h2', p.project));
     var table = document.createElement('table');
