@@ -7,22 +7,27 @@ const { UsageService, parseUsageText, spawnArgs, defaultFetch, pollEnv } = requi
 
 const REAL = 'Current session: 42% used\nCurrent week (all models): 71% used';
 
-// The poll asks about the ACCOUNT, so it must not inherit the SDK's session credential — with it,
-// /usage answers /cost and carries no percentages at all.
-test('pollEnv drops the SDK session token and keeps everything else', () => {
+// The poll asks about the ACCOUNT, so it runs in a known environment — an allowlist, because the
+// culprit in the host's env was never identified, and a denylist can only strip what you can name.
+test('pollEnv passes only what a /usage lookup needs', () => {
   const env = pollEnv({
     PATH: '/usr/bin',
-    CLAUDE_CODE_SESSION_ACCESS_TOKEN: 'session-scoped-secret',
-    ANTHROPIC_API_KEY: 'the-user-own-key',
+    Path: 'C:\\Windows',                       // Windows spelling — case-insensitive match
+    USERPROFILE: 'C:\\Users\\x',
+    HTTPS_PROXY: 'http://proxy:8080',          // kept: dropping it breaks corporate networks
+    CLAUDE_CONFIG_DIR: 'D:\\claude',           // kept: the account's own credentials
+    CLAUDE_CODE_SESSION_ACCESS_TOKEN: 'session-scoped',
     CLAUDE_CODE_ENTRYPOINT: 'sdk-cli',
+    ELECTRON_RUN_AS_NODE: '1',
+    SOME_RANDOM_HOST_VAR: 'nope',
   });
-  assert.ok(!('CLAUDE_CODE_SESSION_ACCESS_TOKEN' in env), 'the session credential is stripped');
-  assert.strictEqual(env.ANTHROPIC_API_KEY, 'the-user-own-key', "the user's own key is untouched");
-  assert.deepStrictEqual([env.PATH, env.CLAUDE_CODE_ENTRYPOINT], ['/usr/bin', 'sdk-cli']);
-  assert.doesNotThrow(() => pollEnv({}), 'absent is fine — nothing to strip');
+  assert.deepStrictEqual(Object.keys(env).sort(),
+    ['CLAUDE_CONFIG_DIR', 'HTTPS_PROXY', 'PATH', 'Path', 'USERPROFILE'].sort());
+  assert.strictEqual(env.Path, 'C:\\Windows', 'the original spelling is preserved');
+  assert.deepStrictEqual(pollEnv({}), {}, 'an empty env is fine');
 });
 
-test('the real poll spawns with the stripped env, not process.env', () => {
+test('the real poll spawns with the allowlisted env, not process.env', () => {
   const saved = process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
   process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = 'leaked-into-the-host';
   try {
@@ -31,6 +36,7 @@ test('the real poll spawns with the stripped env, not process.env', () => {
     defaultFetch({ spawnFn, claudePath: 'C:\\fake\\claude.exe' });
     assert.ok(seen, 'spawn was reached');
     assert.ok(!('CLAUDE_CODE_SESSION_ACCESS_TOKEN' in seen.env), 'the child never sees the token');
+    assert.ok(seen.env.PATH || seen.env.Path, 'but it can still find the binary it needs');
   } finally {
     if (saved === undefined) delete process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     else process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = saved;

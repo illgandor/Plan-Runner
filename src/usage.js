@@ -51,18 +51,32 @@ function spawnArgs(claude) {
 
 const FETCH_TIMEOUT_MS = 45000; // a poll that outlives this is wedged, not slow — kill it (S0108)
 
-// The Agent SDK sets `process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN` on the EXTENSION HOST when a
-// session starts, and a plain spawn inherits the host's env — so from the first run onward this
-// poll authenticated as that session instead of as the owner. `/usage` then answers the question
-// it can answer for a session credential — `/cost` output ("Total cost: $0.0000 …") — which holds
-// no percentages, so the meter reads "unavailable" forever after and presence has nothing to
-// report. It also explains why the meter works in a fresh window until the first step runs.
-// This lookup is about the ACCOUNT, so it must not carry a session's credential. Only that one
-// key is dropped: a deliberate ANTHROPIC_API_KEY of the user's own is still theirs to set.
-// Pure + exported so the strip is a unit test, not a claim.
+// The extension host's environment is not a safe place to run an ACCOUNT-wide lookup from. The
+// SDK mutates it (it sets CLAUDE_CODE_SESSION_ACCESS_TOKEN on session start), VS Code adds its
+// own, and something in there makes `/usage` answer with `/cost` output ("Total cost: $0.0000 …")
+// which carries no percentages at all — the meter then reads "unavailable" for the life of the
+// window. Stripping single suspects chased that for a while and never caught it.
+//
+// So this is an ALLOWLIST, not a denylist: the poll runs in the environment a `/usage` lookup
+// actually needs and nothing else. Verified — the same command under exactly this env returns the
+// real subscription report, while the host's full env does not. Proxy and CA vars are kept
+// because dropping them would break the lookup on a corporate network, and CLAUDE_CONFIG_DIR
+// because that is where the account's own credentials live when it is relocated.
+// Pure + exported so the shape of the child env is a unit test, not a claim.
+const POLL_ENV_KEYS = [
+  'PATH', 'PATHEXT', 'SystemRoot', 'windir', 'ComSpec', 'TEMP', 'TMP',
+  'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'HOME', 'USERNAME',
+  'APPDATA', 'LOCALAPPDATA', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)',
+  'CLAUDE_CONFIG_DIR',                                        // relocated ~/.claude
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS', // corporate networks
+];
 function pollEnv(env = process.env) {
-  const { CLAUDE_CODE_SESSION_ACCESS_TOKEN, ...rest } = env;
-  return rest;
+  const want = new Set(POLL_ENV_KEYS.map((k) => k.toLowerCase()));
+  const out = {};
+  // Windows env names are case-insensitive and Node preserves whatever case the host used, so
+  // match on the lowercased name and pass the key through with its original spelling.
+  for (const [k, v] of Object.entries(env)) if (want.has(k.toLowerCase())) out[k] = v;
+  return out;
 }
 
 // One real /usage call. stdin is closed ('ignore') to avoid the "no stdin data
