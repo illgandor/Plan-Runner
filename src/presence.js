@@ -75,6 +75,31 @@ async function peers(opts = {}) {
   } catch { return null; }
 }
 
+// POST /usage -> 204 (§Account usage). Same gate, same swallow-everything rule as the two above.
+// Both percentages null means the meter has never read anything: return WITHOUT opening a socket,
+// so a window that has never had a reading never creates a row (an empty row renders as a person
+// with no headroom left). `checkedAgeMs` is ELAPSED ms, not a timestamp — the server owns the clock.
+async function reportUsage(snap, opts = {}) {
+  if (!snap || (snap.session == null && snap.week == null)) return null;
+  const ctx = ready(opts);
+  if (!ctx) return null;
+  const doFetch = opts.fetch || globalThis.fetch;
+  try {
+    const res = await doFetch(`${ctx.cfg.url}/usage`, {
+      ...req(ctx.cfg, opts),
+      method: 'POST',
+      body: JSON.stringify({
+        user: ctx.user,
+        session: snap.session ?? null,
+        week: snap.week ?? null,
+        threshold: snap.threshold ?? null,
+        checkedAgeMs: snap.checked ? Math.max(0, Date.now() - snap.checked) : null,
+      }),
+    });
+    return res.ok ? true : null;
+  } catch { return null; }
+}
+
 // ---- The cadence loop (P10-S05, D-043) ----
 // One interval; each tick fires a heartbeat AND a peers poll, both fire-and-forget. Nothing here is
 // ever awaited by a runner path, so a dead or slow server can never block, delay or fail a step
@@ -86,14 +111,21 @@ function startPresence(opts = {}) {
   const setTimer = opts.setTimer || setInterval;
   const clearTimer = opts.clearTimer || clearInterval;
   const onPeers = opts.onPeers || (() => {});
-  const client = opts.client || { heartbeat, peers };
+  const client = opts.client || { heartbeat, peers, reportUsage };
   let timer = null, last = null, ok = null, cur = { state: 'idle', step: null };
+  let usage = null;   // the latest §Usage snapshot; see setUsage below
   let opt = opts; // opts + the resolved identity, so a tick spawns no git at all
 
   const tick = () => {
     Promise.resolve(client.heartbeat(cur, opt)).catch(() => {});
     Promise.resolve(client.peers(opt)).then(onPeers, () => {});
+    if (usage) Promise.resolve(client.reportUsage(usage, opt)).catch(() => {});
   };
+  // D-053: usage rides this tick and is deliberately NOT part of the cadence key below. It changes
+  // every poll, so keying on it would clear and re-arm the interval every minute and the cadence
+  // would thrash — the meter would be either permanently stale or on a timer that never settles.
+  // Assigning here lets the NEXT already-scheduled tick carry the fresh value, which is the point.
+  function setUsage(s) { usage = s || null; }
   function stop() { if (timer) clearTimer(timer); timer = null; last = null; }
   // Hidden panel, no config or no git remote → no timer and no request at all (D-039). ready() is
   // two git execs, so it is resolved once per loop; a settings edit disposes the loop instead.
@@ -116,7 +148,9 @@ function startPresence(opts = {}) {
     timer = setTimer(tick, ms);
     tick(); // report the transition now, not one interval late
   }
-  return { update, stop };
+  return { update, setUsage, stop };
 }
 
-module.exports = { heartbeat, peers, displayName, startPresence, TIMEOUT_MS, RUNNING_MS, IDLE_MS };
+module.exports = {
+  heartbeat, peers, reportUsage, displayName, startPresence, TIMEOUT_MS, RUNNING_MS, IDLE_MS,
+};

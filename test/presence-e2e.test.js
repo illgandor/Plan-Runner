@@ -8,7 +8,7 @@ const assert = require('node:assert');
 const path = require('node:path');
 const os = require('node:os');
 const { createServer, MAX_AGE_MS } = require('../presence-server/server');
-const { heartbeat, peers, startPresence } = require('../src/presence');
+const { heartbeat, peers, reportUsage, startPresence } = require('../src/presence');
 
 global.window = {};
 require('../src/webview/presence-view.js');
@@ -90,6 +90,27 @@ test('the server dying mid-run goes unknown, never throws, and recovers when it 
     assert.deepStrictEqual(await peers(b), []);
     assert.strictEqual(await heartbeat({ state: 'running', step: 'P10-S09' }, a), true);
     assert.deepStrictEqual((await peers(b)).map((p) => p.user), ['Reno']);
+  } finally { await close(srv); }
+});
+
+// P12-S05: the same proof for §Account usage — real client, real server, real /projects reply.
+test('both people report usage and both readings come back on one call', async () => {
+  const srv = await listen();
+  const url = urlOf(srv);
+  try {
+    // Reno's meter is current; Tyler's last good reading is older than the window (D-055).
+    assert.strictEqual(await reportUsage(
+      { session: 42, week: 17, threshold: 90, checked: Date.now() }, reno(url)), true);
+    assert.strictEqual(await reportUsage(
+      { session: 88, week: null, threshold: 80, checked: Date.now() - MAX_AGE_MS - 1000 }, tyler(url)), true);
+
+    const res = await fetch(`${url}/projects`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    const by = Object.fromEntries((await res.json()).users.map((u) => [u.user, u]));
+    assert.deepStrictEqual([by.Reno.session, by.Reno.week, by.Reno.threshold], [42, 17, 90]);
+    assert.strictEqual(by.Reno.stale, false);
+    assert.strictEqual(by.Tyler.week, null, 'a null percentage is never a zero');
+    assert.strictEqual(by.Tyler.session, 88, 'a stale row keeps its last good reading');
+    assert.strictEqual(by.Tyler.stale, true, '…and says so');
   } finally { await close(srv); }
 });
 

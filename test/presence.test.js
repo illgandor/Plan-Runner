@@ -5,7 +5,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const http = require('http');
 const fs = require('fs');
-const { heartbeat, peers, displayName, startPresence, TIMEOUT_MS, RUNNING_MS, IDLE_MS } = require('../src/presence');
+const {
+  heartbeat, peers, reportUsage, displayName, startPresence, TIMEOUT_MS, RUNNING_MS, IDLE_MS,
+} = require('../src/presence');
 
 // projectId + `git config user.name` both go through exec; stub it so tests never depend on git.
 const exec = (_cmd, args) =>
@@ -105,6 +107,7 @@ function loop(extra = {}) {
   const client = {
     heartbeat: (body) => { calls.push({ fn: 'heartbeat', ...body }); return Promise.resolve(true); },
     peers: () => { calls.push({ fn: 'peers' }); return Promise.resolve([]); },
+    reportUsage: (snap) => { calls.push({ fn: 'usage', ...snap }); return Promise.resolve(true); },
   };
   const l = startPresence({
     settings: { url: 'http://pi:8787', token: 'abc', name: 'Tyler' }, cwd: '.', exec, client,
@@ -149,12 +152,65 @@ test('unconfigured presence opens no timer and makes no call on any path (D-039)
 
 test('a presence client that always rejects never reaches the caller', async () => {
   const reject = () => Promise.reject(new Error('server on fire'));
-  const { l, live } = loop({ client: { heartbeat: reject, peers: reject },
+  const { l, live } = loop({ client: { heartbeat: reject, peers: reject, reportUsage: reject },
     onPeers: () => { throw new Error('onPeers must not run on a failed poll'); } });
+  l.setUsage({ session: 42, week: 17, threshold: 90, checked: 1 });
   assert.doesNotThrow(() => l.update({ visible: true, state: 'running', step: 'P10-S05' }));
   assert.strictEqual(live().length, 1, 'a rejecting server does not kill the cadence');
   await new Promise(setImmediate); // let the rejections settle — an unhandled one fails the run
   l.stop();
+});
+
+// P12-S05 / D-053. The whole point of the cadence answer: usage rides the tick that already exists.
+test('usage rides the tick, and a new reading alone never re-arms the interval', () => {
+  const { l, calls, live, timers } = loop();
+  l.update({ visible: true, state: 'running', step: 'P12-S05' });
+  assert.deepStrictEqual(calls.map((c) => c.fn), ['heartbeat', 'peers'], 'no reading yet, no usage call');
+
+  l.setUsage({ session: 42, week: 17, threshold: 90, checked: 1 });
+  assert.strictEqual(calls.length, 2, 'setUsage does not fire a request of its own');
+  assert.strictEqual(timers.length, 1, 'and it does not create a timer');
+  assert.deepStrictEqual(live().map((t) => t.ms), [RUNNING_MS], 'the armed interval is untouched');
+
+  live()[0].fn();                                   // the next already-scheduled tick
+  assert.deepStrictEqual(calls.slice(2).map((c) => c.fn), ['heartbeat', 'peers', 'usage']);
+  assert.strictEqual(calls[4].session, 42);
+
+  // A fresh reading every poll must never touch the timer — that is the thrash D-053 forbids.
+  for (const session of [43, 44, 45]) l.setUsage({ session, week: 17, threshold: 90, checked: 1 });
+  assert.strictEqual(timers.length, 1, 'still exactly one timer ever created');
+  live()[0].fn();
+  assert.strictEqual(calls[calls.length - 1].session, 45, 'the tick carries the newest reading');
+  l.stop();
+});
+
+test('reportUsage posts the §Account usage body, and elapsed ms — never a timestamp', async () => {
+  let seen = null;
+  const { server, url } = await serve((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => { seen = { url: rq.url, body: JSON.parse(body) }; rs.writeHead(204).end(); });
+  });
+  try {
+    const snap = { session: 42, week: null, threshold: 90, checked: Date.now() - 5000 };
+    assert.strictEqual(await reportUsage(snap, opts(url)), true);
+    assert.strictEqual(seen.url, '/usage');
+    assert.strictEqual(seen.body.user, 'Tyler');
+    assert.deepStrictEqual([seen.body.session, seen.body.week, seen.body.threshold], [42, null, 90]);
+    assert.ok(seen.body.checkedAgeMs >= 5000 && seen.body.checkedAgeMs < 10000,
+      `elapsed ms, not an epoch: ${seen.body.checkedAgeMs}`);
+
+    // Never read anything → no socket at all, so no row is ever created for a window with no meter.
+    seen = null;
+    assert.strictEqual(await reportUsage({ session: null, week: null, threshold: 90 }, opts(url)), null);
+    assert.strictEqual(await reportUsage(null, opts(url)), null);
+    assert.strictEqual(seen, null, 'nothing was sent');
+
+    // Unconfigured stays dark here too (D-039), and a never-checked reading sends a null age.
+    assert.strictEqual(await reportUsage(snap, opts('', { settings: { url: '', token: '' } })), null);
+    assert.strictEqual(await reportUsage({ session: 1, week: null, checked: null }, opts(url)), true);
+    assert.strictEqual(seen.body.checkedAgeMs, null);
+  } finally { server.close(); }
 });
 
 // The architectural rule of P10-S05, locked: the heartbeat rides extension.js's runner EVENTS, so

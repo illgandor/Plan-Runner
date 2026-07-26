@@ -122,6 +122,9 @@ function syncPresence() {
       cwd: p.path,
       onPeers: (peers) => post({ kind: 'presence', peers }), // S06 renders it; the token never goes to the webview
     });
+    // P12-S05: seed a fresh loop from whatever the meter already knows, so a settings edit (which
+    // disposes the loop) doesn't blank this window's usage row until the next poll lands.
+    if (usage) presence.setUsage(usage.snapshot());
   }
   presence.update({ visible: !!(view && view.visible), state: runningStep ? 'running' : 'idle', step: runningStep });
 }
@@ -522,7 +525,9 @@ function activate(context) {
 
   // Account-wide usage poller, seeded from application-scoped §Config (D-004).
   usage = new UsageService(usageConfig());
-  usage.on('update', (s) => { if (runner) runner.onUsageUpdate(); postUsage(s); }); // S08: gate the loop, then repaint
+  // S08: gate the loop, repaint, then hand the reading to presence — which reports it on its own
+  // already-armed tick (D-053), never on this poll's cadence.
+  usage.on('update', (s) => { if (runner) runner.onUsageUpdate(); postUsage(s); presence?.setUsage(s); });
   if (state.engine !== 'codex') usage.start(); // Codex has no usage source — don't poll Claude for it
 
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
