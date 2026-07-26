@@ -51,6 +51,20 @@ function spawnArgs(claude) {
 
 const FETCH_TIMEOUT_MS = 45000; // a poll that outlives this is wedged, not slow — kill it (S0108)
 
+// The Agent SDK sets `process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN` on the EXTENSION HOST when a
+// session starts, and a plain spawn inherits the host's env — so from the first run onward this
+// poll authenticated as that session instead of as the owner. `/usage` then answers the question
+// it can answer for a session credential — `/cost` output ("Total cost: $0.0000 …") — which holds
+// no percentages, so the meter reads "unavailable" forever after and presence has nothing to
+// report. It also explains why the meter works in a fresh window until the first step runs.
+// This lookup is about the ACCOUNT, so it must not carry a session's credential. Only that one
+// key is dropped: a deliberate ANTHROPIC_API_KEY of the user's own is still theirs to set.
+// Pure + exported so the strip is a unit test, not a claim.
+function pollEnv(env = process.env) {
+  const { CLAUDE_CODE_SESSION_ACCESS_TOKEN, ...rest } = env;
+  return rest;
+}
+
 // One real /usage call. stdin is closed ('ignore') to avoid the "no stdin data
 // received in 3s" stall the prototype hit calling claude non-interactively.
 //
@@ -72,7 +86,7 @@ function defaultFetch({ timeoutMs = FETCH_TIMEOUT_MS, spawnFn = spawn, claudePat
     const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
     let p;
     const { command, args, options } = spawnArgs(claude);
-    try { p = spawnFn(command, args, { ...options, cwd: os.homedir() }); }
+    try { p = spawnFn(command, args, { ...options, cwd: os.homedir(), env: pollEnv() }); }
     catch (e) { return finish({ error: e.message }); }
     timer = setTimeout(() => {
       try { p.kill(); } catch { /* already gone */ }
@@ -177,4 +191,6 @@ class UsageService extends EventEmitter {
   describe() { return `Paused: account usage ${this.max}% ≥ ${this.threshold}% — waiting for it to drop`; }
 }
 
-module.exports = { UsageService, defaultFetch, cleanupUsageSession, parseUsageText, spawnArgs, FETCH_TIMEOUT_MS };
+module.exports = {
+  UsageService, defaultFetch, cleanupUsageSession, parseUsageText, spawnArgs, pollEnv, FETCH_TIMEOUT_MS,
+};

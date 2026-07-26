@@ -3,9 +3,39 @@
 // spends no Claude usage — fetch is faked, nothing spawns.
 const test = require('node:test');
 const assert = require('node:assert');
-const { UsageService, parseUsageText, spawnArgs, defaultFetch } = require('../src/usage');
+const { UsageService, parseUsageText, spawnArgs, defaultFetch, pollEnv } = require('../src/usage');
 
 const REAL = 'Current session: 42% used\nCurrent week (all models): 71% used';
+
+// The poll asks about the ACCOUNT, so it must not inherit the SDK's session credential — with it,
+// /usage answers /cost and carries no percentages at all.
+test('pollEnv drops the SDK session token and keeps everything else', () => {
+  const env = pollEnv({
+    PATH: '/usr/bin',
+    CLAUDE_CODE_SESSION_ACCESS_TOKEN: 'session-scoped-secret',
+    ANTHROPIC_API_KEY: 'the-user-own-key',
+    CLAUDE_CODE_ENTRYPOINT: 'sdk-cli',
+  });
+  assert.ok(!('CLAUDE_CODE_SESSION_ACCESS_TOKEN' in env), 'the session credential is stripped');
+  assert.strictEqual(env.ANTHROPIC_API_KEY, 'the-user-own-key', "the user's own key is untouched");
+  assert.deepStrictEqual([env.PATH, env.CLAUDE_CODE_ENTRYPOINT], ['/usr/bin', 'sdk-cli']);
+  assert.doesNotThrow(() => pollEnv({}), 'absent is fine — nothing to strip');
+});
+
+test('the real poll spawns with the stripped env, not process.env', () => {
+  const saved = process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
+  process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = 'leaked-into-the-host';
+  try {
+    let seen = null;
+    const spawnFn = (_c, _a, opts) => { seen = opts; throw new Error('no real spawn in a test'); };
+    defaultFetch({ spawnFn, claudePath: 'C:\\fake\\claude.exe' });
+    assert.ok(seen, 'spawn was reached');
+    assert.ok(!('CLAUDE_CODE_SESSION_ACCESS_TOKEN' in seen.env), 'the child never sees the token');
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
+    else process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = saved;
+  }
+});
 
 test('spawnArgs routes a .cmd shim through the shell with a quoted path', () => {
   const s = spawnArgs('C:\\Program Files\\nodejs\\claude.cmd');
