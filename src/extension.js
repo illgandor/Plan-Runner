@@ -525,9 +525,11 @@ function activate(context) {
 
   // Account-wide usage poller, seeded from application-scoped §Config (D-004).
   usage = new UsageService(usageConfig());
-  // S08: gate the loop, repaint, then hand the reading to presence — which reports it on its own
-  // already-armed tick (D-053), never on this poll's cadence.
-  usage.on('update', (s) => { if (runner) runner.onUsageUpdate(); postUsage(s); presence?.setUsage(s); });
+  // Presence FIRST, then the gate, then the repaint. onUsageUpdate() can run _runNext()/_pause()
+  // — the whole step machine — and postUsage() touches the webview; a throw in either used to
+  // starve the reading that trails them, and a fire-and-forget report must not ride behind the
+  // runner state machine. It reports on presence's own already-armed tick (D-053), not this poll.
+  usage.on('update', (s) => { presence?.setUsage(s); if (runner) runner.onUsageUpdate(); postUsage(s); });
   if (state.engine !== 'codex') usage.start(); // Codex has no usage source — don't poll Claude for it
 
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
