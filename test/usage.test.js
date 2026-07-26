@@ -49,6 +49,24 @@ test('a null poll keeps the prior snapshot and sets error', async () => {
   assert.ok(svc.error, 'error set on the empty poll');
 });
 
+// A poll can succeed, parse, and still carry no percentages — `/usage` has been seen answering
+// with `/cost` output. A bare "unavailable this check" hides that; the panel must name it.
+test('an empty poll reports WHAT /usage answered, when it answered something', async () => {
+  const svc = new UsageService({ threshold: 90, pollSec: 60,
+    fetch: () => Promise.resolve({ session: null, week: null, raw: 'Total cost:  $0.0000' }) });
+  await svc._tick();
+  svc.stop();
+  assert.match(svc.error, /Total cost:\s+\$0\.0000/, 'the actual answer reaches the meter');
+  assert.match(svc.error, /usage unavailable this check/, 'and still says what it means');
+
+  // No raw text to show (a fake fetch, or a genuinely empty result) keeps the old bare message.
+  const bare = new UsageService({ threshold: 90, pollSec: 60,
+    fetch: () => Promise.resolve({ session: null, week: null }) });
+  await bare._tick();
+  bare.stop();
+  assert.strictEqual(bare.error, 'usage unavailable this check');
+});
+
 test('a spawn/parse error also keeps last-good', async () => {
   const readings = [{ session: 42, week: 71 }, { error: 'boom' }];
   const svc = new UsageService({ fetch: () => Promise.resolve(readings.shift()) });

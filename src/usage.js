@@ -85,7 +85,16 @@ function defaultFetch({ timeoutMs = FETCH_TIMEOUT_MS, spawnFn = spawn, claudePat
       try {
         const j = JSON.parse(out);
         cleanupUsageSession(j.session_id); // don't leave a transcript behind for a free poll
-        finish(parseUsageText(j.result || ''));
+        const parsed = parseUsageText(j.result || '');
+        // The poll can succeed, parse, and still carry no percentages — `/usage` has been observed
+        // answering with `/cost` output ("Total cost: $0.0000 …") instead of the subscription
+        // report. That used to surface as a bare "unavailable this check", which says nothing and
+        // cost a long diagnosis. Carry the first line so the panel names what actually came back.
+        if (parsed.session == null && parsed.week == null) {
+          parsed.raw = String(j.result || '').trim().split('\n').map((l) => l.trim())
+            .filter(Boolean)[0]?.slice(0, 120) || '';
+        }
+        finish(parsed);
       } catch (e) {
         // Name what actually happened — exit code and the first line of stderr — so a broken
         // meter is diagnosable from the panel instead of just showing a dash.
@@ -132,7 +141,8 @@ class UsageService extends EventEmitter {
       // `/usage` returned no percentages this poll (claude -p sometimes doesn't run
       // the slash command). KEEP the last-known-good values instead of blanking the
       // bar — this is the fix for the meter flickering to empty and back.
-      this.error = 'usage unavailable this check';
+      this.error = r.raw ? `usage unavailable this check — /usage answered: ${r.raw}`
+        : 'usage unavailable this check';
     } else {
       if (r.session != null) this.session = r.session;
       if (r.week != null) this.week = r.week;
