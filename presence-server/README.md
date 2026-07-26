@@ -15,7 +15,7 @@ Runner does not need it: with no server configured, presence is simply dark.
 - **No accounts.** One shared token for everybody. There is no per-person login to revoke.
 - **No live persistence.** *Who is on right now* lives in memory. A restart forgets everyone,
   and everyone re-appears on their next heartbeat (within ~5 minutes). Only the last-seen
-  history is written to disk, and it is never consulted to decide who is live.
+  history and the usage rows are written to disk, and neither is consulted to decide who is live.
 - **No identity guarantees.** Anyone holding the token can claim any display name.
 
 ## Requirements
@@ -58,11 +58,31 @@ last seen. It asks for the token once, keeps it in `localStorage`, and refreshes
 seconds. It defaults to the last 30 days with a **Show all** toggle, and puts projects more than
 one person reports at the top. "Forget token" clears it from the browser.
 
+Above the project list there is an **Account usage** section: one row per person with their Claude
+session and week percentages, their pause threshold, and when the reading was taken. That is the
+whole feature — two people on one plan being able to see who is about to trip the pause gate.
+
+A few things it deliberately does not pretend:
+
+- **Usage is account-wide, not per project.** `claude /usage` reports one number for the whole
+  plan, so a row is that person's entire account, never their spend on the project above it.
+  Attributing it per repo would be inventing data.
+- **A row goes stale, it never disappears.** If someone closes their panel — or their meter starts
+  failing while their window stays open — the row keeps its last good numbers and is dimmed and
+  labelled with the reading's age. A blank where a percentage used to be reads as headroom, and
+  that is exactly the wrong thing to show someone deciding whether to start a run.
+- **Codex windows report nothing.** The Codex CLI exposes no usage percentage at all, so a machine
+  running Codex simply lets its row go stale.
+- A dash means "not known". It never means zero.
+
 Two things to be clear-eyed about before you hand anyone that URL:
 
 - **The token is the whole boundary.** Anyone who has it sees *every* repo name anyone has ever
   reported to this server, plus who worked on what and when — not just the projects they share
-  with you. If that list is sensitive, run a second server rather than sharing this token.
+  with you. It now also shows **each person's account usage percentages and their pause
+  threshold**: how much of their plan they have burned this session and this week. That is the
+  point of the feature, and it is worth saying out loud before you share the token. If any of that
+  is sensitive, run a second server rather than sharing this one.
 - **Last-seen always under-reports.** Panels heartbeat only while the Plan Runner panel is
   *visible*. Work done with the panel closed, in another editor, or on a machine with presence
   unconfigured leaves no trace at all. An empty or stale row means "no evidence here", never
@@ -70,8 +90,8 @@ Two things to be clear-eyed about before you hand anyone that URL:
 
 ## The state file
 
-Last-seen history is the one thing that survives a restart. It is written to `PRESENCE_STATE`,
-defaulting to `presence-state.json` beside `server.js`:
+Last-seen history and the usage rows are the things that survive a restart. They are written to
+`PRESENCE_STATE`, defaulting to `presence-state.json` beside `server.js`:
 
 - Point it somewhere the service user can write. The systemd unit sets it to
   `%S/plan-runner/presence-state.json` — `/var/lib/plan-runner/` for a system unit,
@@ -79,8 +99,10 @@ defaulting to `presence-state.json` beside `server.js`:
 - **Don't bother backing it up.** It is advisory, it rebuilds itself as people work, and losing
   it costs you nothing but old rows. A missing, unreadable, or corrupt file starts empty and
   never stops the server from booting.
-- It is capped at 500 rows, oldest last-seen evicted first. Nothing is ever deleted by age, so a
-  long-idle project stays listed until the cap pushes it out.
+- It is capped at 500 history rows and 50 usage rows, oldest evicted first. Nothing is ever deleted
+  by age, so a long-idle project stays listed until the cap pushes it out.
+- An older state file written before usage existed upgrades in place: the file gains a
+  `{projects, users}` envelope on the first write and no history is lost.
 - Writes are debounced and atomic (temp file + rename), so a power cut can't truncate it.
 - Delete the file to wipe history. The live "who is on now" map isn't in there at all.
 
@@ -170,13 +192,21 @@ Runs the server on an ephemeral port and exercises the real HTTP surface.
 
 ## Protocol
 
-Frozen in `planning/reference/CONTRACTS.md` §Presence and §Dashboard (local to the maintainer's
-checkout). Every DATA route requires `Authorization: Bearer <token>`:
+Frozen in `planning/reference/CONTRACTS.md` §Presence, §Dashboard and §Account usage (local to the
+maintainer's checkout). Every DATA route requires `Authorization: Bearer <token>`:
 
 - `POST /heartbeat` — `{project, user, step, state, ts}` → `204`. Malformed → `400`.
 - `GET /presence/:project` → `200 {peers:[{user, step, state, ts}]}`. Unknown project is `[]`,
   never a `404`. Peers unseen for 900s are dropped. Callers filter themselves out by `user`.
-- `GET /projects` → `200 {projects:[{project, reporters, peers:[…], people:[…]}]}`. `peers` is
-  live under the same 900s rule; `people` is the history rows. Nothing known is `{projects: []}`.
+- `POST /usage` — `{user, session, week, threshold, checkedAgeMs}` → `204`. Percentages are
+  `0–100` or `null`; both null is a `400`. `checkedAgeMs` is **elapsed milliseconds since that
+  client's last good reading**, not a timestamp, so the server can place the reading in its own
+  clock without trusting anyone else's.
+- `GET /projects` → `200 {projects:[{project, reporters, peers:[…], people:[…]}], users:[…]}`.
+  `peers` is live under the same 900s rule; `people` is the history rows. `users` is TOP-LEVEL —
+  usage is account-wide, not per project — and each row is
+  `{user, session, week, threshold, ts, checkedAt, stale}`. `stale` is set from the age of the
+  READING, so a live window with a broken meter is stale too. Nothing known is `{projects: [],
+  users: []}`.
 - `GET /` — the dashboard page, `text/html`, **unauthenticated**, the one exemption. It carries
   no data of its own; everything on it is fetched from `/projects` with the token.
