@@ -408,6 +408,13 @@ test('the dashboard loads nothing external and never uses innerHTML', () => {
   // D-015 applies here too: peer names and step ids are remote input, so they go in as TEXT only.
   assert.doesNotMatch(html, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   assert.match(html, /textContent/);
+  // P12-S04: the usage bar's width is CSSOM, never a style attribute — the CSP admits only the
+  // nonce'd block, so setAttribute('style') would be silently dropped and the bar would read 0%.
+  assert.doesNotMatch(html, /setAttribute\(\s*['"]style/);
+  assert.match(html, /\.style\.width = /);
+  // Usage comes from the ONE endpoint the page already reads; no second fetch may appear.
+  assert.deepStrictEqual([...html.matchAll(/fetch\(\s*'([^']+)'/g)].map((m) => m[1]), ['/projects']);
+  assert.match(html, /renderUsage\(data\.users \|\| \[\]\)/);
 });
 
 test('a user name containing markup survives the wire verbatim — the server never escapes it', async () => {
@@ -415,9 +422,11 @@ test('a user name containing markup survives the wire verbatim — the server ne
   const evil = '<img src=x onerror=alert(1)>';
   try {
     await s.beat({ project: PROJECT, user: evil, step: '</script>', state: 'running' });
-    const [p] = (await (await s.projects()).json()).projects;
+    await s.usage({ user: evil, session: 42, week: null });
+    const { projects: [p], users } = await (await s.projects()).json();
     assert.strictEqual(p.people[0].user, evil);   // JSON, not HTML: escaping is the PAGE's job
     assert.strictEqual(p.peers[0].step, '</script>');
+    assert.strictEqual(users[0].user, evil);      // …and the usage row is remote input too
   } finally { await s.close(); }
 });
 
