@@ -17,6 +17,10 @@ Runner does not need it: with no server configured, presence is simply dark.
   and everyone re-appears on their next heartbeat (within ~5 minutes). Only the last-seen
   history and the usage rows are written to disk, and neither is consulted to decide who is live.
 - **No identity guarantees.** Anyone holding the token can claim any display name.
+- **No defaults, so nothing to inherit.** This package ships no server address and no token —
+  `.env.example` is blank, and the extension's `presenceUrl`/`presenceToken` default to empty. A
+  fresh clone of this repo cannot reach anyone else's presence server, and the extension talks to
+  exactly the one host you type in yourself.
 
 ## Requirements
 
@@ -61,6 +65,8 @@ one person reports at the top. "Forget token" clears it from the browser.
 Above the project list there is an **Account usage** section: one row per person with their Claude
 session and week percentages, their pause threshold, and when the reading was taken. That is the
 whole feature — two people on one plan being able to see who is about to trip the pause gate.
+(Plan Runner also has a third, per-model weekly bar in the panel; only session and week are
+reported here, and the threshold shown is the **session** pause limit.)
 
 A few things it deliberately does not pretend:
 
@@ -127,7 +133,8 @@ so it starts at boot without you logging in. `%S` follows you: state lands in
 
 ## Point Plan Runner at it
 
-In VS Code settings (or the panel's ⚙ settings), on **every** machine that should participate:
+In **VS Code Settings** (search `planRunner.presence` — these three are deliberately *not* in the
+panel's ⚙ menu, which holds the run/usage settings), on **every** machine that should participate:
 
 | Setting | Value |
 |---|---|

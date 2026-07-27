@@ -2,7 +2,8 @@ name: Release
 
 # Push a version tag (e.g. v0.1.0) to build the .vsix and publish it to a GitHub
 # Release. The in-extension self-updater (S03) polls these releases and side-loads
-# the newer .vsix. windows-latest because the bundled claude binary is win32-x64.
+# the newer .vsix. windows-latest because this is a Windows-only build (the claude
+# binary is resolved from the user's PATH install, not bundled — D-019).
 on:
   push:
     tags: ['v*']

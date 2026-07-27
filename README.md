@@ -36,6 +36,15 @@ Runner then executes those steps one fresh context window at a time until the pl
   (`@anthropic-ai/claude-agent-sdk`, same as the standalone app) or the **Codex** CLI.
 - **Per-workspace toggle** in the status bar: `Plan Runner: On/Off`. On in one project ≠
   on in another. Off means the loop can't start — no surprise autonomous runs.
+- **Never advances past stranded work**: a step closes only when its work is committed (and
+  pushed, when there's an upstream), and a step won't *start* on a checkout that is **behind
+  its remote** — so it can't build on top of someone else's unpulled commits.
+- At a **plan boundary** the close-out session first audits the finished plan — spot-checking
+  each step against the repo and filing a gap step for anything marked done but unmet.
+- **Bundles the skills it needs.** The `master-plan` + `next-step` skills are shipped in the
+  extension and installed into `~/.claude/skills` (and `~/.codex/skills`) on activation, then
+  refreshed once per version. An existing copy is backed up, never clobbered silently; the
+  command `Plan Runner: Reinstall master-plan + next-step Skills` forces a refresh.
 
 ## Two engines
 
@@ -61,18 +70,20 @@ the editor's own diff theme; long tool output collapses behind a **show more**.
 ### Run controls
 
 - **Stop** — graceful: finishes the current step, then halts the loop cleanly.
-- **Abort** ("⏹ Stop now") — hard teardown of the running session immediately.
+- **Abort run** — hard teardown of the running session immediately, mid-step.
+- **Abort turn** — interrupts just the current turn; the step stays and you can keep going.
 - **Pause / Resume** — Claude-only mid-turn hold: interrupts the current turn (session kept)
   and resumes the same step on demand. Hidden when Codex is selected.
 
 ### Leaving it running unattended
 
-- **Usage meter** — live Session, Week (all models) and per-model week (Fable) account-usage
-  bars, read from `claude /usage`; keeps the last good reading rather than blanking on a
-  missing sample.
+- **Usage meter** — live Session, Week (all models) and per-model week account-usage bars, read
+  from `claude /usage`; keeps the last good reading rather than blanking on a missing sample.
+  The third bar is labelled by whatever model `/usage` names (Fable today), matched by shape so
+  a rename can't silently blank it.
 - **Global pause thresholds** — each bar has its own pause % in ⚙ Settings, and all three apply
-  to *every* window/project (VS Code application-scoped settings). The Fable limit is scoped to
-  the model you picked — it never holds a run on a different model.
+  to *every* window/project (VS Code application-scoped settings). The per-model limit is scoped
+  to the model you picked — it never holds a run on a different model.
 - **Auto pause + resume** — whichever limit crosses first interrupts the current turn (session
   kept) and holds the loop. It resumes only once *every* limit is back under, so a session
   reset doesn't release a weekly hold. (Separate from a manual Pause, which won't auto-resume.)
@@ -80,6 +91,12 @@ the editor's own diff theme; long tool output collapses behind a **show more**.
   (`HH:MM`) wall-clock cutoff, so a run can bound itself.
 - **Needs-you notification** — when a step blocks on a question or a non-allowed command,
   you get an OS notification so you don't have to watch the panel.
+- **Stall watchdog** — optional, off by default: a live turn that goes silent for
+  `stallNotifySeconds` fires one notification + panel line, so a hung stream is visible before
+  morning. Notify-only — the turn is never killed or altered.
+- **Auto-skip a question** — optional, off by default: `autoSkipQuestionSeconds` gives an
+  unattended question card a countdown and Skips it at zero, so an overnight run doesn't
+  strand on one. Questions only, **never** a permission prompt; any interaction cancels it.
 - **Run ledger** — one append-only JSON line per completed step at
   `.plan-runner/runs.jsonl` (step id, engine, model, effort, timings). Best-effort: a failed
   write never stalls the loop.
@@ -89,6 +106,35 @@ the editor's own diff theme; long tool output collapses behind a **show more**.
   checkpointing, with a git-checkout fallback) when a run went sideways.
 - **Self-update** — polls GitHub Releases and side-loads a newer `.vsix` in place, then
   prompts a reload (stock VS Code won't auto-update a side-loaded extension).
+
+## Presence — who else is on this project (optional, off by default)
+
+An advisory light under the status line: `● sam · P03-S04 · 2m ago`, or "only you on this
+project". It talks to a **presence server you host yourself** — a small Node-stdlib service
+(no deps, no database) that lives in [presence-server/](presence-server/) and is never bundled
+into the `.vsix`.
+
+- **Off unless *you* configure it.** There is no default server and no default token. With
+  `planRunner.presenceUrl` / `planRunner.presenceToken` empty — how it ships — presence opens no
+  socket at all. Nothing in this repo points at anyone's server.
+- **Nothing about it is load-bearing.** Every call has a 5s timeout and every failure is
+  swallowed: a dead, slow, or misconfigured server can't block, delay, or fail a step. The worst
+  case is a light that shows nothing.
+- **Identity is your git remote**, normalized to `github.com/owner/repo`, so two clones on two
+  machines agree which project they're on. No remote → `local/<folder-name>`; not a repo → no
+  presence.
+- **It heartbeats only while the panel is visible** (60s during a live run, 300s idle), so
+  last-seen always under-reports. An empty row means "no evidence here", never "nobody worked
+  on it".
+- **Dashboard**: open the server's own URL in a browser for every project it has heard about,
+  plus an **Account usage** row per person — session and week %, their pause limit, and how old
+  the reading is. Useful when two people share one plan.
+- **The shared token is the whole boundary.** Anyone who has it sees every repo name and every
+  usage row on that server. Keep the port on a private network (Tailscale or WireGuard);
+  exposing it to the public internet is unsupported.
+
+Setup, the systemd unit, the state file, and the wire protocol:
+[presence-server/README.md](presence-server/README.md).
 
 ## Run it (development)
 
@@ -101,8 +147,13 @@ Then open this folder in VS Code and press **F5** — that launches an Extension
 Development Host. Open a master-plan project folder in it, click the Plan Runner icon in
 the activity bar, toggle it **On** (status bar), and hit **Start**.
 
-Requires the `claude` CLI logged in (same as the standalone app) and the `next-step` /
-`master-plan` skills in `~/.claude/skills`. For the Codex engine, the `codex` CLI logged in.
+Requires the `claude` CLI logged in (same as the standalone app); the `master-plan` /
+`next-step` skills are bundled and installed for you on activation. For the Codex engine, the
+`codex` CLI logged in.
+
+Gates before you ship anything: `npm test` (unit — never bare `node --test`),
+`npm run check:syntax`, `npm test --prefix presence-server` (the server is its own package),
+and `npx vsce package`.
 
 ## Install as a real extension (no F5)
 
@@ -125,6 +176,3 @@ resolved from your PATH install, not bundled); cross-platform is a non-goal.
 
 [Apache-2.0](LICENSE) — repo source only. The `claude` binary is external (resolved from your
 PATH install, not bundled or redistributed). See [NOTICE](NOTICE).
-
-See [PLAN.md](PLAN.md) for architecture, the reuse map, decisions log, and the remaining
-work.

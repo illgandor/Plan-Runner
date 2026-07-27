@@ -52,7 +52,7 @@ test('projectId normalizes what git prints, newline and all', () => {
 test('a git repo with NO origin reports as local/<repo-root-name>, not null', () => {
   const exec = (_bin, args) => {
     if (args[0] === 'remote') throw new Error("error: No such remote 'origin'");
-    return 'C:/Users/dtyle/Desktop/workshop/projects/Security Cameras\n';
+    return 'C:/repos/Security Cameras\n';
   };
   assert.strictEqual(projectId('.', { exec }), 'local/security cameras');
 });
