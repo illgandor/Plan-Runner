@@ -52,9 +52,9 @@ test('projectId normalizes what git prints, newline and all', () => {
 test('a git repo with NO origin reports as local/<repo-root-name>, not null', () => {
   const exec = (_bin, args) => {
     if (args[0] === 'remote') throw new Error("error: No such remote 'origin'");
-    return 'C:/repos/Security Cameras\n';
+    return 'C:/repos/My Widget App\n';
   };
-  assert.strictEqual(projectId('.', { exec }), 'local/security cameras');
+  assert.strictEqual(projectId('.', { exec }), 'local/my widget app');
 });
 
 test('the local fallback never spawns rev-parse when an origin exists', () => {
