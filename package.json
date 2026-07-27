@@ -31,7 +31,23 @@
           "minimum": 10,
           "maximum": 100,
           "scope": "application",
-          "description": "Pause the loop when account usage reaches this % (applies to all windows)."
+          "description": "Pause the loop when SESSION usage reaches this % (applies to all windows)."
+        },
+        "planRunner.pauseWeekThresholdPct": {
+          "type": "number",
+          "default": 90,
+          "minimum": 10,
+          "maximum": 100,
+          "scope": "application",
+          "description": "Pause the loop when WEEKLY (all models) usage reaches this %. Each limit pauses the same way; the loop only resumes once every limit is back under."
+        },
+        "planRunner.pauseFableThresholdPct": {
+          "type": "number",
+          "default": 90,
+          "minimum": 10,
+          "maximum": 100,
+          "scope": "application",
+          "description": "Pause the loop when the per-model WEEKLY usage (Fable) reaches this %. Applies only while the run's model is that model — it never holds a run on a different one."
         },
         "planRunner.usagePollSeconds": {
           "type": "number",

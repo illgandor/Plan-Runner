@@ -5,7 +5,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { UsageService, parseUsageText, spawnArgs, defaultFetch, pollEnv } = require('../src/usage');
 
-const REAL = 'Current session: 42% used\nCurrent week (all models): 71% used';
+// Verbatim shape of a real `/usage` answer, including the per-model weekly line.
+const REAL = 'Current session: 42% used · resets Jul 27, 11pm (America/New_York)\n'
+  + 'Current week (all models): 71% used · resets Aug 1, 2pm (America/New_York)\n'
+  + 'Current week (Fable): 12% used';
 
 // The poll asks about the ACCOUNT, so it runs in a known environment — an allowlist, because the
 // culprit in the host's env was never identified, and a denylist can only strip what you can name.
@@ -57,12 +60,23 @@ test('spawnArgs spawns a real .exe directly (no shell)', () => {
 });
 
 test('parseUsageText reads % from a real /usage sample', () => {
-  assert.deepStrictEqual(parseUsageText(REAL), { session: 42, week: 71 });
+  assert.deepStrictEqual(parseUsageText(REAL), { session: 42, week: 71, fable: 12, fableLabel: 'Fable' });
 });
 
-test('parseUsageText returns {null,null} for conversational text', () => {
-  assert.deepStrictEqual(parseUsageText('I can help you with that!'), { session: null, week: null });
-  assert.deepStrictEqual(parseUsageText(''), { session: null, week: null });
+// The per-model line is matched by SHAPE, not by the name "Fable" — it read "(Opus)" before and
+// a name-pinned regex would blank that bar silently the day it changes again.
+test('parseUsageText reads the per-model week whatever the model is called', () => {
+  const p = parseUsageText('Current session: 5% used\nCurrent week (all models): 9% used\nCurrent week (Opus): 3% used');
+  assert.deepStrictEqual(p, { session: 5, week: 9, fable: 3, fableLabel: 'Opus' });
+  // …and an account whose answer has no per-model line is a perfectly good reading.
+  const none = parseUsageText('Current session: 5% used\nCurrent week (all models): 9% used');
+  assert.deepStrictEqual(none, { session: 5, week: 9, fable: null, fableLabel: null });
+});
+
+test('parseUsageText returns nulls for conversational text', () => {
+  const empty = { session: null, week: null, fable: null, fableLabel: null };
+  assert.deepStrictEqual(parseUsageText('I can help you with that!'), empty);
+  assert.deepStrictEqual(parseUsageText(''), empty);
 });
 
 test('a null poll keeps the prior snapshot and sets error', async () => {
@@ -158,6 +172,77 @@ test('the poll cadence re-arms on a settings change', async () => {
   svc.setConfig({ pollSec: 10 });
   assert.notStrictEqual(svc._timer, first, 'the pending hour-long timer was replaced');
   svc.stop();
+});
+
+// ---- Per-meter pause limits (session / weekly / per-model weekly) ----
+// One helper: a service seeded with one reading, no timer, no spawn.
+async function seeded(reading, cfg = {}) {
+  const svc = new UsageService({ ...cfg, fetch: () => Promise.resolve(reading) });
+  await svc._tick();
+  svc.stop();
+  return svc;
+}
+
+test('each limit pauses on its own — whichever is crossed first', async () => {
+  const cfg = { threshold: 90, weekThreshold: 85, fableThreshold: 80 };
+  const under = await seeded({ session: 50, week: 50, fable: 50, fableLabel: 'Fable' }, cfg);
+  assert.strictEqual(under.isOverThreshold('opus[1m]'), false, 'everything under → running');
+
+  const sess = await seeded({ session: 91, week: 10, fable: 0, fableLabel: 'Fable' }, cfg);
+  assert.strictEqual(sess.isOverThreshold('opus[1m]'), true, 'session alone pauses');
+  assert.match(sess.describe('opus[1m]'), /session usage 91% ≥ 90%/);
+
+  const wk = await seeded({ session: 10, week: 86, fable: 0, fableLabel: 'Fable' }, cfg);
+  assert.strictEqual(wk.isOverThreshold('opus[1m]'), true, 'weekly alone pauses, exactly the same way');
+  assert.match(wk.describe('opus[1m]'), /weekly usage 86% ≥ 85%/);
+});
+
+// The whole point of the ask: a weekly hold must survive a session reset.
+test('a session reset does NOT release a weekly hold', async () => {
+  const cfg = { threshold: 90, weekThreshold: 85 };
+  const svc = new UsageService({ ...cfg, fetch: () => Promise.resolve({ session: 95, week: 86 }) });
+  await svc._tick(); svc.stop();
+  assert.strictEqual(svc.isOverThreshold('opus[1m]'), true, 'both over → paused');
+
+  svc.fetch = () => Promise.resolve({ session: 0, week: 86 }); // the 5-hour window reset; the week did not
+  await svc._tick(); svc.stop();
+  assert.strictEqual(svc.isOverThreshold('opus[1m]'), true, 'still held on the weekly');
+
+  svc.fetch = () => Promise.resolve({ session: 0, week: 2 });  // the week finally reset too
+  await svc._tick(); svc.stop();
+  assert.strictEqual(svc.isOverThreshold('opus[1m]'), false, 'released only when EVERY limit is under');
+});
+
+// A Fable week at its limit is no reason to hold a run on a different model.
+test('the per-model weekly limit binds only a run using that model', async () => {
+  const svc = await seeded({ session: 10, week: 10, fable: 99, fableLabel: 'Fable' },
+    { threshold: 90, weekThreshold: 90, fableThreshold: 80 });
+  assert.strictEqual(svc.isOverThreshold('opus[1m]'), false, 'an Opus run is untouched by a full Fable week');
+  assert.strictEqual(svc.isOverThreshold('claude-fable-5[1m]'), true, 'the Fable run pauses');
+  assert.strictEqual(svc.isOverThreshold('fable'), true, 'the bare alias counts too');
+  assert.strictEqual(svc.isOverThreshold(), false, 'no model given → the model-scoped limit does not apply');
+  assert.match(svc.describe('fable'), /weekly Fable usage 99% ≥ 80%/);
+});
+
+test('the per-model week keeps last-good and never makes a reading look empty', async () => {
+  const svc = new UsageService({ fetch: () => Promise.resolve({ session: 5, week: 9, fable: 3, fableLabel: 'Fable' }) });
+  await svc._tick(); svc.stop();
+  assert.strictEqual(svc.fable, 3);
+
+  svc.fetch = () => Promise.resolve({ session: 6, week: 9, fable: null, fableLabel: null }); // no per-model line this poll
+  await svc._tick(); svc.stop();
+  assert.strictEqual(svc.error, null, 'a missing per-model line is NOT an empty poll');
+  assert.strictEqual(svc.fable, 3, 'and the bar keeps its last-good value');
+  assert.strictEqual(svc.snapshot().fableLabel, 'Fable');
+});
+
+test('setConfig applies all three limits', async () => {
+  const svc = await seeded({ session: 88, week: 88, fable: 88, fableLabel: 'Fable' });
+  assert.strictEqual(svc.isOverThreshold('fable'), false, '88 < the 90 defaults');
+  svc.setConfig({ weekThreshold: 85 });
+  assert.strictEqual(svc.isOverThreshold('fable'), true, 'the new weekly limit takes effect immediately');
+  assert.deepStrictEqual(
+    [svc.snapshot().threshold, svc.snapshot().weekThreshold, svc.snapshot().fableThreshold], [90, 85, 90]);
 });
 
 // P05-S02: start() while a poll is already in flight must not spawn a second loop.

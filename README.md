@@ -48,7 +48,7 @@ Pick the engine in the panel; the rest of the UI stays the same.
 
 The Claude code path is unchanged when Codex isn't selected; the webview and loop are
 engine-agnostic, so streaming and the run controls work the same either way. The account
-**usage meter and the Pause @ N% gate are Claude-only** — Codex exposes no `/usage` %, so it
+**usage meter and its pause gates are Claude-only** — Codex exposes no `/usage` %, so it
 shows N/A with a plain token counter instead.
 
 ## Panel features
@@ -67,13 +67,15 @@ the editor's own diff theme; long tool output collapses behind a **show more**.
 
 ### Leaving it running unattended
 
-- **Usage meter** — live Session and Week account-usage bars, read from `claude /usage`;
-  keeps the last good reading rather than blanking on a missing sample.
-- **Global pause threshold** — `Pause @ N%` applies to *every* window/project (VS Code
-  application-scoped setting), so one number governs all your autonomous runs.
-- **Auto pause + resume** — when usage crosses the threshold the current turn is interrupted
-  (session kept) and resumes automatically once usage drops back under. (This is separate
-  from a manual Pause, which won't auto-resume.)
+- **Usage meter** — live Session, Week (all models) and per-model week (Fable) account-usage
+  bars, read from `claude /usage`; keeps the last good reading rather than blanking on a
+  missing sample.
+- **Global pause thresholds** — each bar has its own pause % in ⚙ Settings, and all three apply
+  to *every* window/project (VS Code application-scoped settings). The Fable limit is scoped to
+  the model you picked — it never holds a run on a different model.
+- **Auto pause + resume** — whichever limit crosses first interrupts the current turn (session
+  kept) and holds the loop. It resumes only once *every* limit is back under, so a session
+  reset doesn't release a weekly hold. (Separate from a manual Pause, which won't auto-resume.)
 - **Run caps** — optional, off by default: `maxTurns`, `maxStepsPerRun`, and a `stopAtTime`
   (`HH:MM`) wall-clock cutoff, so a run can bound itself.
 - **Needs-you notification** — when a step blocks on a question or a non-allowed command,

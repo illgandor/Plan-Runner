@@ -12,14 +12,24 @@ const { findClaude } = require('./claude-path');
 
 const SESSION_RE = /Current session:\s*(\d+)%/;
 const WEEK_RE = /Current week \(all models\):\s*(\d+)%/;
+// The per-model weekly line — today `Current week (Fable): 0% used`. Matched by SHAPE, not by
+// the literal name: that line read `(Opus)` before and will read something else again, and a
+// name-pinned regex would silently blank the bar the day it changes. `(all models)` is the
+// line above, so it's the one alternative excluded.
+const MODEL_WEEK_RE = /Current week \((?!all models\))([^)\n]+)\):\s*(\d+)%/;
 
-// Pure parse of a `/usage` result string → percentages. Both null when the text carries
-// no percentages (e.g. `claude -p` answered conversationally instead of running the slash
-// command). Exported so tests can hit fixtures without spawning a real claude.
+// Pure parse of a `/usage` result string → percentages. session/week both null when the text
+// carries no percentages (e.g. `claude -p` answered conversationally instead of running the
+// slash command). `fable` is the per-model weekly and is null whenever that line is absent —
+// not every account/plan reports one. Exported so tests can hit fixtures without spawning a
+// real claude. NOTE: the poll itself (spawn/env/timeout) is untouched by the model limit —
+// this reads one more line of the same answer, nothing more.
 function parseUsageText(text) {
   const s = SESSION_RE.exec(text || '');
   const w = WEEK_RE.exec(text || '');
-  return { session: s ? +s[1] : null, week: w ? +w[1] : null };
+  const m = MODEL_WEEK_RE.exec(text || '');
+  return { session: s ? +s[1] : null, week: w ? +w[1] : null,
+    fable: m ? +m[2] : null, fableLabel: m ? m[1].trim() : null };
 }
 
 // Each `claude -p /usage` spawns a throwaway Claude Code session that gets saved as a
@@ -133,14 +143,27 @@ function defaultFetch({ timeoutMs = FETCH_TIMEOUT_MS, spawnFn = spawn, claudePat
   });
 }
 
+// The per-model weekly limit binds only a run that USES that model: a Fable week at 100% is no
+// reason to hold an Opus run. `model` is the run's EFFECTIVE model — an alias ('fable') or a
+// versioned id ('claude-fable-5[1m]') — and `label` is whatever /usage named ('Fable'), so a
+// substring match covers both spellings without a name list to keep up to date.
+function usesModel(model, label) {
+  if (!model || !label) return false;
+  return String(model).toLowerCase().includes(String(label).toLowerCase());
+}
+
 class UsageService extends EventEmitter {
-  constructor({ threshold = 90, pollSec = 60, fetch = defaultFetch } = {}) {
+  constructor({ threshold = 90, weekThreshold = 90, fableThreshold = 90, pollSec = 60, fetch = defaultFetch } = {}) {
     super();
-    this.threshold = threshold;
+    this.threshold = threshold;           // session limit %
+    this.weekThreshold = weekThreshold;   // weekly (all models) limit %
+    this.fableThreshold = fableThreshold; // per-model weekly limit % (model-scoped, see usesModel)
     this.pollSec = pollSec;
     this.fetch = fetch;
     this.session = null;
     this.week = null;
+    this.fable = null;
+    this.fableLabel = 'Fable'; // replaced by whatever /usage names on the first reading
     this.max = null;
     this.checked = null;
     this.error = null;
@@ -174,6 +197,10 @@ class UsageService extends EventEmitter {
     } else {
       if (r.session != null) this.session = r.session;
       if (r.week != null) this.week = r.week;
+      // Same last-good rule for the model week. A poll is judged empty on session/week ONLY
+      // (above) — an account that reports no per-model line is not a broken reading.
+      if (r.fable != null) this.fable = r.fable;
+      if (r.fableLabel) this.fableLabel = r.fableLabel;
       const vals = [this.session, this.week].filter((v) => v != null);
       this.max = vals.length ? Math.max(...vals) : null;
       this.checked = Date.now();
@@ -183,12 +210,18 @@ class UsageService extends EventEmitter {
     this._timer = setTimeout(() => this._tick(), Math.max(10, this.pollSec) * 1000);
   }
 
+  // `max` stays session/week only (§Usage snapshot): the model week is gated per-run, so folding
+  // it in here would make one account-wide number mean different things in different windows.
   snapshot() {
-    return { session: this.session, week: this.week, max: this.max, checked: this.checked, error: this.error, threshold: this.threshold, pollSec: this.pollSec };
+    return { session: this.session, week: this.week, fable: this.fable, fableLabel: this.fableLabel,
+      max: this.max, checked: this.checked, error: this.error, threshold: this.threshold,
+      weekThreshold: this.weekThreshold, fableThreshold: this.fableThreshold, pollSec: this.pollSec };
   }
 
-  setConfig({ threshold, pollSec }) {
+  setConfig({ threshold, weekThreshold, fableThreshold, pollSec }) {
     if (threshold != null) this.threshold = threshold;
+    if (weekThreshold != null) this.weekThreshold = weekThreshold;
+    if (fableThreshold != null) this.fableThreshold = fableThreshold;
     const changed = pollSec != null && pollSec !== this.pollSec;
     if (pollSec != null) this.pollSec = pollSec;
     // Re-arm a pending timer on the NEW cadence — otherwise dropping the poll to 10s to watch a
@@ -200,11 +233,26 @@ class UsageService extends EventEmitter {
     this.emit('update', this.snapshot());
   }
 
-  // The proactive gate StepRunner consults before starting a step.
-  isOverThreshold() { return this.max != null && this.max >= this.threshold; }
-  describe() { return `Paused: account usage ${this.max}% ≥ ${this.threshold}% — waiting for it to drop`; }
+  // Every meter that is at/over ITS OWN limit, for the run's model. Each limit pauses the same
+  // way, so being over is "any of them" — and being clear is therefore "all of them", which is
+  // what makes a session reset NOT release a weekly hold. A null reading is never over (§Usage
+  // snapshot null-safe rule): the gate pauses on a number, never on a missing one.
+  breaches(model) {
+    const rows = [
+      { name: 'session', pct: this.session, limit: this.threshold },
+      { name: 'weekly', pct: this.week, limit: this.weekThreshold },
+    ];
+    if (usesModel(model, this.fableLabel))
+      rows.push({ name: `weekly ${this.fableLabel}`, pct: this.fable, limit: this.fableThreshold });
+    return rows.filter((r) => r.pct != null && r.limit != null && r.pct >= r.limit);
+  }
+
+  // The gate StepRunner consults before starting a step and on every poll. `model` is the run's
+  // effective model — omit it and the model-scoped limit simply doesn't apply.
+  isOverThreshold(model) { return this.breaches(model).length > 0; }
+  describe(model) { return this.breaches(model).map((r) => `${r.name} usage ${r.pct}% ≥ ${r.limit}%`).join(' · '); }
 }
 
 module.exports = {
-  UsageService, defaultFetch, cleanupUsageSession, parseUsageText, spawnArgs, pollEnv, FETCH_TIMEOUT_MS,
+  UsageService, defaultFetch, cleanupUsageSession, parseUsageText, spawnArgs, pollEnv, usesModel, FETCH_TIMEOUT_MS,
 };

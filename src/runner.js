@@ -232,7 +232,17 @@ class Runner extends EventEmitter {
 
   // The usage gate polls CLAUDE account usage; it's meaningless for a Codex run (different
   // account, no source), so never pause a Codex step on it. (Codex usage % is N/A — see the panel.)
-  _over() { return (this.project.engine || 'claude') !== 'codex' && !!(this.usageGate && this.usageGate.isOverThreshold()); }
+  // The model goes to the gate because one of its limits is per-model: a Fable weekly at its
+  // limit must not hold a run on another model.
+  _over() { return (this.project.engine || 'claude') !== 'codex' && !!(this.usageGate && this.usageGate.isOverThreshold(this.project.model)); }
+
+  // Which limit is holding the run, named. A weekly hold can last days where a session hold lasts
+  // hours, so "usage at/above threshold" alone doesn't say what you're waiting on. Optional on the
+  // gate: an older/stub gate without describe() falls back to the generic line.
+  _gateWhy() {
+    const d = this.usageGate && this.usageGate.describe && this.usageGate.describe(this.project.model);
+    return d || 'account usage at/above threshold';
+  }
 
   _runNext() {
     if (this.stopRequested) return this._finish('idle', 'Stopped');
@@ -270,7 +280,7 @@ class Runner extends EventEmitter {
       this.currentStep = next;
       this.gating = true;
       this.paused = true;
-      return this.emit('paused', { reason: `Usage at/above threshold — waiting to start ${next}` });
+      return this.emit('paused', { reason: `Usage — ${this._gateWhy()}; waiting to start ${next}` });
     }
     this.gating = false;
     this._runStep(next);
@@ -520,7 +530,7 @@ class Runner extends EventEmitter {
     this._provider.interrupt(this.id);
     this.emit('paused', { reason: this.manualPause
       ? `Paused ${this.currentStep} — click Resume to continue`
-      : `Usage at/above threshold — paused ${this.currentStep}, resuming when it drops` });
+      : `Paused ${this.currentStep} — ${this._gateWhy()}; resuming when every limit is back under` });
   }
 
   // Usage dropped back under while paused: re-enter the SAME step's session.

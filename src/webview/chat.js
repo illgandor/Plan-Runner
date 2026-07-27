@@ -17,10 +17,10 @@
       <span class="ver" id="ver" title="Plan Runner version"></span>
     </div>
     <div class="meter" id="meter" hidden>
-      <div class="gauge"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span></div>
-      <div class="gauge"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span></div>
+      <div class="gauge" id="srow"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span></div>
+      <div class="gauge" id="wrow"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span></div>
+      <div class="gauge" id="frow"><span class="glabel" id="flabel">Fable</span><progress id="fbar" max="100" value="0"></progress><span class="gpct" id="fpct">—</span></div>
       <div class="gauge tokrow" id="tokrow" style="display:none" title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
-      <label class="thresh" title="Pause the loop at this account-usage % (applies to all windows)">Pause @ <input id="thresh" type="number" min="10" max="100" step="1">%</label>
       <div class="uerr" id="uerr" hidden></div>
     </div>
     <div class="status" id="status" aria-live="polite">Idle</div>
@@ -473,7 +473,9 @@
   // ---- In-composer settings popover (P08-S01): edit planRunner.* without leaving the panel ----
   // Reuses the .mcpmenu float. Host owns the values (getSettings/setSetting) + global-config write.
   const SETTINGS = [
-    { key: 'pauseThresholdPct', label: 'Pause @ usage %', min: 10, max: 100 },
+    { key: 'pauseThresholdPct', label: 'Pause @ session %', min: 10, max: 100 },
+    { key: 'pauseWeekThresholdPct', label: 'Pause @ week %', min: 10, max: 100 },
+    { key: 'pauseFableThresholdPct', label: 'Pause @ Fable week %', min: 10, max: 100 },
     { key: 'usagePollSeconds', label: 'Usage poll (seconds)', min: 10, max: 3600 },
     { key: 'finalizeQuietSeconds', label: 'Finalize quiet (seconds)', min: 0, max: 600 },
     { key: 'maxTurns', label: 'Max turns / step (0 = off)', min: 0, max: 1000 },
@@ -535,7 +537,9 @@
     '',
     '## Usage meter & caps',
     '',
-    '- The meter shows **Session** and **Week** account-usage %. **Pause @ N%** holds the loop when usage crosses your threshold, then resumes once it drops back.',
+    '- The meter shows **Session**, **Week** (all models) and the per-model week (**Fable**) account-usage %.',
+    '- Each bar has its own pause % in **⚙ Settings**. Whichever one crosses first holds the loop — and it resumes only once *every* limit is back under, so a session reset never releases a weekly hold.',
+    '- The Fable limit is scoped to the model you picked: it can\'t hold a run on a different model (that bar dims when it doesn\'t apply).',
     '- *Claude only*: Codex reports no account usage %, so it shows **N/A** plus a token counter instead.',
     '- **Settings** covers the usage-poll cadence, the finalize-quiet window, and optional run caps (max turns per step, max steps per run, stop-at-time) — all off by default.',
     '',
@@ -607,24 +611,39 @@
     const codex = d.engine === 'codex';
     $('tokrow').style.display = codex ? 'flex' : 'none'; // inline display beats the .gauge{display:flex} rule
     const m = $('meter');
+    $('flabel').textContent = d.fableLabel || 'Fable';
+    // The per-model week is scoped to the run's model (same rule as the gate) — shown always so
+    // the number is readable, dimmed when it cannot pause THIS run.
+    const modelScoped = !!(d.model && d.fableLabel
+      && String(d.model).toLowerCase().includes(String(d.fableLabel).toLowerCase()));
+    $('frow').classList.toggle('inert', !modelScoped);
     if (codex) {
       // Codex has no account usage % — show N/A instead of the stale Claude reading, and
       // surface the token counter. The pause-gate is inert on Codex, so no over/warn/paused.
-      naBar($('sbar'), $('spct')); naBar($('wbar'), $('wpct'));
+      naBar($('sbar'), $('spct')); naBar($('wbar'), $('wpct')); naBar($('fbar'), $('fpct'));
       $('tokval').textContent = sessionTokens ? fmt(sessionTokens) : '—';
-      m.classList.remove('over', 'warn', 'paused');
+      ['srow', 'wrow', 'frow'].forEach((r) => $(r).classList.remove('over', 'warn'));
+      m.classList.remove('paused');
       m.classList.add('codex');
     } else {
       m.classList.remove('codex');
-      paintBar($('sbar'), $('spct'), d.session);
-      paintBar($('wbar'), $('wpct'), d.week);
-      m.classList.toggle('over', d.max != null && d.max >= d.threshold);
-      m.classList.toggle('warn', d.max != null && d.max >= d.threshold - 10 && d.max < d.threshold);
+      // Each bar carries its OWN limit now, so over/warn is per-row: whichever one trips is the
+      // one that pauses, and the loop stays paused until every one of them is back under.
+      paintGauge($('srow'), $('sbar'), $('spct'), d.session, d.threshold);
+      paintGauge($('wrow'), $('wbar'), $('wpct'), d.week, d.weekThreshold);
+      paintGauge($('frow'), $('fbar'), $('fpct'), d.fable, modelScoped ? d.fableThreshold : null);
       m.classList.toggle('paused', !!d.paused); // hook painted by S08
     }
-    const t = $('thresh');
-    if (d.threshold != null && document.activeElement !== t) t.value = d.threshold; // don't fight the editor
     paintUsageError(d, codex);
+  }
+  // One bar + its own pause limit. A null limit means this bar can't pause the run (Codex, or a
+  // model-scoped limit while another model is picked): paint the number, never the alarm.
+  function paintGauge(row, bar, txt, v, limit) {
+    paintBar(bar, txt, v);
+    const live = v != null && limit != null;
+    row.classList.toggle('over', live && v >= limit);
+    row.classList.toggle('warn', live && v >= limit - 10 && v < limit);
+    row.title = limit != null ? `Pauses the loop at ${limit}% — change it in ⚙ Settings` : '';
   }
   // A meter stuck on "—" used to say nothing about WHY (a dead poll, a missing claude, a parse
   // failure all looked identical). Show the reason when there is no reading at all, and date the
@@ -738,7 +757,6 @@
   $('effort').onchange = (e) => vscode.postMessage({ type: 'setEffort', value: e.target.value });
   wireDefaultSwap($('model')); wireDefaultSwap($('effort')); // collapsed "default" ↔ expanded "default - …" (S0093)
   $('mode').onchange = (e) => vscode.postMessage({ type: 'setMode', value: e.target.value });
-  $('thresh').onchange = (e) => vscode.postMessage({ type: 'setThreshold', value: e.target.value });
   function send() {
     const ta = $('input'); const text = ta.value.trim();
     if (!text) return;

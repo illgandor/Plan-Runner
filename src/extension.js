@@ -163,12 +163,17 @@ function sendConfig() {
 // §Config keys — application-scoped, read the same in every window (D-004).
 function usageConfig() {
   const c = vscode.workspace.getConfiguration('planRunner');
-  return { threshold: c.get('pauseThresholdPct', 90), pollSec: c.get('usagePollSeconds', 60), finalizeSec: c.get('finalizeQuietSeconds', 120) };
+  return { threshold: c.get('pauseThresholdPct', 90),                 // session %
+    weekThreshold: c.get('pauseWeekThresholdPct', 90),                // weekly (all models) %
+    fableThreshold: c.get('pauseFableThresholdPct', 90),              // weekly per-model %, model-scoped
+    pollSec: c.get('usagePollSeconds', 60), finalizeSec: c.get('finalizeQuietSeconds', 120) };
 }
 // §In-extension UI — the six planRunner.* keys the ⚙ popover reads/writes, with the
 // package.json contribution bounds (host clamps writes to these). stopAtTime = "HH:MM"|"".
 const SETTING_SPEC = {
   pauseThresholdPct: { min: 10, max: 100, def: 90 },
+  pauseWeekThresholdPct: { min: 10, max: 100, def: 90 },
+  pauseFableThresholdPct: { min: 10, max: 100, def: 90 },
   usagePollSeconds: { min: 10, max: 3600, def: 60 },
   finalizeQuietSeconds: { min: 0, max: 600, def: 120 },
   maxTurns: { min: 0, max: 1000, def: 0 },
@@ -185,7 +190,12 @@ function postSettings() {
 }
 // Frozen §Webview⇄host shape (`checked` is additive — no existing field changed). `paused`
 // reflects the Runner holding on the usage gate (S08); `checked` dates a stale reading.
-function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week, max: s.max, threshold: s.threshold, paused: !!(runner && runner.paused), error: s.error, checked: s.checked }); }
+// `model` rides along so the panel can dim the per-model bar when this run isn't on that model —
+// the same scoping the gate applies (a Fable week never holds an Opus run).
+function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week,
+  fable: s.fable, fableLabel: s.fableLabel, max: s.max, threshold: s.threshold,
+  weekThreshold: s.weekThreshold, fableThreshold: s.fableThreshold, model: effectiveModel(),
+  paused: !!(runner && runner.paused), error: s.error, checked: s.checked }); }
 
 // " · done/total" from PROGRESS.md, or "" when unreadable/not a master-plan project (P09-S15).
 function planFrac(dir) { const f = readPlanFraction(dir); return f ? ` · ${f.done}/${f.total}` : ''; }
@@ -370,6 +380,7 @@ async function onMessage(m) {
       const modelIds = engine.modelValues(caps().models);
       state.model = modelIds.includes(m.value) ? m.value : modelIds[0];
       ctx.workspaceState.update('planRunner.model', state.model);
+      if (usage) postUsage(usage.snapshot()); // the per-model bar is scoped to the pick — repaint now, not next poll
       break;
     }
     case 'setEffort': {
@@ -384,18 +395,11 @@ async function onMessage(m) {
       ctx.workspaceState.update('planRunner.mode', state.mode);
       break;
     }
-    case 'setThreshold': {
-      // Write global config; onDidChangeConfiguration re-applies it here and in every window.
-      const v = Math.max(10, Math.min(100, Math.round(Number(m.value))));
-      if (Number.isFinite(v))
-        vscode.workspace.getConfiguration('planRunner').update('pauseThresholdPct', v, vscode.ConfigurationTarget.Global);
-      break;
-    }
     case 'getSettings':   // ⚙ popover opened — send current planRunner.* values (P08-S01)
       postSettings();
       break;
     case 'setSetting': {
-      // Write one planRunner.* key to global config (same path as setThreshold). Validate/clamp
+      // Write one planRunner.* key to global config. Validate/clamp
       // to the package.json contribution bounds, then echo the persisted values back to the popover.
       const spec = SETTING_SPEC[m.key];
       if (!spec) break;                       // ignore unknown keys
@@ -549,7 +553,8 @@ function activate(context) {
       { webviewOptions: { retainContextWhenHidden: true } }),
     // Config is application-scoped: a write in ANY window fires this in EVERY window.
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('planRunner.pauseThresholdPct') || e.affectsConfiguration('planRunner.usagePollSeconds'))
+      if (['pauseThresholdPct', 'pauseWeekThresholdPct', 'pauseFableThresholdPct', 'usagePollSeconds']
+        .some((k) => e.affectsConfiguration('planRunner.' + k)))
         usage.setConfig(usageConfig()); // re-applies + emits 'update' → postUsage repaints
       if (e.affectsConfiguration('planRunner.finalizeQuietSeconds') && runner)
         runner.finalizeMs = usageConfig().finalizeSec * 1000; // live-apply the settle window
