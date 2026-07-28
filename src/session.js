@@ -130,9 +130,8 @@ function sdkOptions(cwd, options = {}) {
   // when >0 so an unset cap never constrains the SDK. At the cap the query ends → existing
   // _onTurnEnd routes to needs-you rather than the step looping tools unbounded. (D-016)
   if (options.maxTurns > 0) o.maxTurns = options.maxTurns;
-  // File checkpointing (P06-S06): snapshot files before edits so a bad step's changes can be
-  // rolled back to step start (the step-start user message) via Query.rewindFiles(). (D-020)
-  o.enableFileCheckpointing = true;
+  // No enableFileCheckpointing: it existed ONLY to back the Discard-step button, which is gone
+  // (D-059). Nothing reads a checkpoint now, so snapshotting every edit is pure cost.
   return o;
 }
 
@@ -281,20 +280,6 @@ async function fetchModels(cwd, options = {}) {
     try { settle(q && q.return && q.return()); } catch { /* already ended */ }
   }
 }
-// First user-message uuid of the CURRENT live session per project — the SDK file-checkpoint
-// anchor ("step start"). rewindFiles(id, thisUuid) rolls the step's edits back to before its
-// prompt ran. Reset when a fresh session starts (see start()). (P06-S06)
-const stepStartMsg = new Map();
-function stepStartMessageId(id) { return stepStartMsg.get(id) || null; }
-// Roll the live session's checkpointed files back to userMessageId (enableFileCheckpointing).
-// Returns the SDK RewindFilesResult, or null when there's no live session / no id / an SDK too
-// old to rewind — the caller then falls back to `git checkout`. (P06-S06)
-async function rewindFiles(id, userMessageId) {
-  const q = sessions.get(id) && sessions.get(id).q;
-  if (!q || typeof q.rewindFiles !== 'function' || !userMessageId) return null;
-  return q.rewindFiles(userMessageId);
-}
-
 // start({id,cwd,prompt,options}) → run query(), map+forward every message. hooks.send
 // overrides the sink (the Runner wraps it to watch for turn-end); hooks.onDone fires
 // when the stream ends. Keeps the session live by id.
@@ -309,7 +294,6 @@ function start({ id, cwd, prompt, options }, hooks = {}) {
     hooks.onDone && hooks.onDone();
     return null;
   }
-  stepStartMsg.delete(id); // fresh session → capture this step's step-start message anew (P06-S06)
   const input = inputQueue(prompt);
   const opts = sdkOptions(cwd, { ...options, claudePath });
   opts.canUseTool = makeCanUseTool(id); // also answers AskUserQuestion (renders the choice card)
@@ -323,8 +307,6 @@ function start({ id, cwd, prompt, options }, hooks = {}) {
       entry.q = q;
       for await (const m of q) {
         if (entry.aborted) break;
-        // First user (replay) message = the step's prompt → its uuid is the rewind anchor (P06-S06).
-        if (m.type === 'user' && m.uuid && !stepStartMsg.has(id)) stepStartMsg.set(id, m.uuid);
         for (const msg of mapMessage(m)) {
           if (msg.type === 'init' && msg.sessionId) sessionIds.set(id, msg.sessionId);
           if (msg.type === 'init' && msg.model) resolvedModelByProject.set(id, msg.model);
@@ -378,4 +360,4 @@ function stop(id) {
 
 module.exports = { start, send, chat, stop, interrupt, currentSessionId, mcpStatus, mapMessage,
   setQuery, getQuery, sdkOptions, modeToPermission, resolvePermission, resolveDialog, setSink, defaultSend, sessions,
-  stepStartMessageId, rewindFiles, resolvedModel, supportedModels, fetchModels };
+  resolvedModel, supportedModels, fetchModels };

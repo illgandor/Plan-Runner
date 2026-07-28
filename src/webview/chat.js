@@ -35,7 +35,6 @@
         <button id="mcp" title="MCP servers for the active engine">🔌 MCP</button>
         <button id="settings" title="Plan Runner settings">⚙ Settings</button>
         <button id="help" title="Help — the loop and every control">? Help</button>
-        <button id="discard" title="Roll this step's file edits back to how they were at step start" hidden>↺ Discard step changes</button>
         <button id="pause" title="Pause the current turn (Claude only) — Resume continues the same step" hidden>⏸ Pause</button>
         <button id="abort" title="Halt the whole run right now — tear the session down without finishing the current step" hidden>⏹ Stop now</button>
         <button id="stop" title="Interrupt the turn in progress. Chat only — during a run use Pause, which holds the same step">✋ Interrupt</button>
@@ -531,7 +530,7 @@
     '- **Stop now** — halts the whole run immediately, mid-step, without waiting for the step to close out.',
     '- **Interrupt** — interrupts the turn in progress. *Chat only*: during a run use **Pause**, which does the same interrupt while holding the step.',
     '- **Pause / Resume** — hold and resume the same step. *Claude only* (hidden on Codex).',
-    '- **Discard step changes** — roll this step\'s file edits back to how they were at step start.',
+    '- Undoing a step is VS Code\'s **Source Control** panel, not a Plan Runner button — you get a diff to read before you throw anything away, and it works per file.',
     '- **Engine / Model / Effort / Mode** — pick the engine (Claude or Codex), its model, reasoning effort, and permission mode.',
     '- **Attach** — hand a file\'s path to Claude to read.',
     '- **MCP** — view, add, and reconnect MCP servers for the active engine.',
@@ -745,7 +744,6 @@
     // each now says WHAT it halts and WHEN. The run toggle escalates on the second click.
     $('run').textContent = !running ? '▶ Start' : (stopping ? '⏹ Stop now' : '■ Stop after step');
     $('run').classList.toggle('primary', !running);
-    $('discard').hidden = !running; // only offer step-discard while a step is in flight (P06-S06)
     $('abort').hidden = !running || stopping; // once the toggle itself reads "⏹ Stop now", don't show two
     $('pause').hidden = !running || engine === 'codex'; // Claude-only manual hold (P07-S02, D-023)
     $('pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
@@ -780,7 +778,6 @@
   $('abort').onclick = () => vscode.postMessage({ type: 'abort' }); // hard teardown now (P07-S01)
   $('pause').onclick = () => vscode.postMessage({ type: paused ? 'resume' : 'pause' }); // manual hold (P07-S02)
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });
-  $('discard').onclick = () => vscode.postMessage({ type: 'discard' }); // host confirms modally
 
   $('attach').onclick = () => vscode.postMessage({ type: 'attach' });
   $('mcp').onclick = () => {

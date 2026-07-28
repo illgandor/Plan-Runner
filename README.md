@@ -106,8 +106,6 @@ the editor's own diff theme; long tool output collapses behind a **show more**.
   write never stalls the loop.
 - **MCP button** — lists the servers in your `~/.claude` config with their last-init status;
   authorize, add, remove, or reconnect them via `claude mcp`.
-- **Discard step** — roll the workspace back to a step's starting checkpoint (SDK file
-  checkpointing, with a git-checkout fallback) when a run went sideways.
 - **Self-update** — polls GitHub Releases and side-loads a newer `.vsix` in place, then
   prompts a reload (stock VS Code won't auto-update a side-loaded extension).
 
