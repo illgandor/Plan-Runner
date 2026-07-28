@@ -194,12 +194,33 @@ class Runner extends EventEmitter {
   // session; the stopRequested checks in _runNext/_advance halt before the next step. If nothing
   // is mid-step (idle, gating on the usage gate, or paused with no live turn), there's no step to
   // finish, so halt now — this also cancels a pending resume (running=false stops onUsageUpdate).
+  //
+  // A SECOND stop escalates to the hard teardown (D-057). The graceful branch can only end at a
+  // turn end, so a turn that never ends — a permission card nobody answered, a wedged stream, a
+  // provider child killed out from under the loop — left every further Stop click re-entering
+  // this same branch and doing nothing, with no way out but killing the window. Clicking Stop
+  // again is what anyone tries next, so that is now the escape hatch.
   stop() {
     if (!this.running && !session.sessions.has(this.id)) return;
+    if (this.stopRequested) return this.abort('idle', 'Stopped now');
     this.stopRequested = true;
     if (!this._turnLive && !this.finalizing) return this.abort('idle', 'Stopped');
     this.emit('status', { state: 'running', step: this.currentStep,
-      detail: `Will stop after ${this.currentStep} — finishing this step, then halting.` });
+      detail: `Will stop after ${this.currentStep} — finishing this step. Stop again to halt now.` });
+  }
+
+  // Interrupt the LIVE turn without ending the run — the panel's ✋ Interrupt during a run.
+  // Routed through the manual-pause path on purpose: a raw provider.interrupt() is INVISIBLE to
+  // the runner, and the turn-end it produces is then read as a completed turn (on Claude the loop
+  // advances past the step or retries it; on Codex the child dies emitting nothing at all and the
+  // loop hangs with _turnLive stuck true). _pause() does the bookkeeping BEFORE the interrupt, so
+  // _onTurnEnd's `paused` guard drops the turn-end and Resume re-enters the same step.
+  // Returns false when there's nothing safe to interrupt (no live turn, or Codex — see D-023).
+  interruptTurn() {
+    if (!this.running || this.paused || !this._turnLive) return false;
+    if ((this.project.engine || 'claude') === 'codex') return false;
+    this.pauseManual();
+    return this.paused;
   }
 
   // Hard abort (D-022): immediate teardown — kill the live session and finish NOW, mid-step. This

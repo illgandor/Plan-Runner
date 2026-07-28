@@ -37,8 +37,8 @@
         <button id="help" title="Help — the loop and every control">? Help</button>
         <button id="discard" title="Roll this step's file edits back to how they were at step start" hidden>↺ Discard step changes</button>
         <button id="pause" title="Pause the current turn (Claude only) — Resume continues the same step" hidden>⏸ Pause</button>
-        <button id="abort" title="Abort the run now — tear the session down immediately, without finishing the current step" hidden>⏹ Abort run</button>
-        <button id="stop" title="Abort the current turn (the step stays)">■ Abort turn</button>
+        <button id="abort" title="Halt the whole run right now — tear the session down without finishing the current step" hidden>⏹ Stop now</button>
+        <button id="stop" title="Interrupt the turn in progress. Chat only — during a run use Pause, which holds the same step">✋ Interrupt</button>
         <button id="send" class="send">Send</button>
       </div>
     </div>
@@ -48,6 +48,7 @@
   const log = $('log');
   const logoUri = app.dataset.logo || '';   // webview URI of src/webview/logo.png (from html())
   let enabled = false, running = false, engine = 'claude', paused = false;
+  let stopping = false;  // a graceful Stop is pending — the toggle now reads "⏹ Stop now" (D-057)
   let autoSkipSec = 0;   // >0 → question cards auto-Skip after this many seconds (D-028; never permissions)
   let sessionTokens = 0;          // Codex: running total of tokens processed this run (no usage % source)
   let cur = null;                 // current assistant message element being streamed into
@@ -455,7 +456,7 @@
         break;
       case 'step-started': stepChip('▶ ' + (d.step || 'step')); cur = null; break;
       case 'step-done': stepChip(`✔ ${d.from} → ${d.to}`); cur = null; break;
-      case 'done': system('■ ' + (d.detail || d.state)); running = false; paused = false; resetTokens(); reflect(); break;
+      case 'done': system('■ ' + (d.detail || d.state)); running = false; paused = false; stopping = false; resetTokens(); reflect(); break;
       case 'usage': usage(d); break;
       case 'paused': paused = true; reflect(); setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
       case 'resumed': paused = false; reflect(); setStatus({ state: 'running', detail: 'Resumed' }); break;
@@ -525,9 +526,10 @@
     '',
     '## Controls',
     '',
-    '- **Start / Stop** — Stop is *graceful*: it finishes the current step, then halts.',
-    '- **Abort run** — hard abort: tears the session down immediately, mid-step.',
-    '- **Abort turn** — interrupts just the current turn (the step stays; you can keep going).',
+    '- **Start / Stop after step** — the run toggle. Stopping is *graceful*: it finishes the current step, then halts.',
+    '- Click it **again** and it becomes **⏹ Stop now** — the escape hatch when the current turn can\'t finish on its own.',
+    '- **Stop now** — halts the whole run immediately, mid-step, without waiting for the step to close out.',
+    '- **Interrupt** — interrupts the turn in progress. *Chat only*: during a run use **Pause**, which does the same interrupt while holding the step.',
     '- **Pause / Resume** — hold and resume the same step. *Claude only* (hidden on Codex).',
     '- **Discard step changes** — roll this step\'s file edits back to how they were at step start.',
     '- **Engine / Model / Effort / Mode** — pick the engine (Claude or Codex), its model, reasoning effort, and permission mode.',
@@ -542,6 +544,7 @@
     '- Each bar has its own pause % in **⚙ Settings**. Whichever one crosses first holds the loop — and it resumes only once *every* limit is back under, so a session reset never releases a weekly hold.',
     '- The per-model limit is scoped to the model you picked: it can\'t hold a run on a different model (that bar dims when it doesn\'t apply).',
     '- A missing reading never pauses anything: the meter keeps its last good numbers rather than blanking, and the gate only ever trips on a real number.',
+    '- When a poll fails, the bars **dim** and a ⚠ line says why and how old the reading is — dimmed bars are frozen, not current. Two windows can only disagree if one of them is showing a stale reading.',
     '- *Claude only*: Codex reports no account usage %, so it shows **N/A** plus a token counter instead.',
     '',
     '## Leaving it running overnight',
@@ -665,12 +668,21 @@
   // A meter stuck on "—" used to say nothing about WHY (a dead poll, a missing claude, a parse
   // failure all looked identical). Show the reason when there is no reading at all, and date the
   // reading in the tooltip when we're painting a stale one.
+  //
+  // The ⚠ used to be gated on `blank` — nothing painted yet — which meant it could only ever appear
+  // BEFORE the first good reading. After that the bars keep their last-good numbers on every failed
+  // poll (the §Usage snapshot anti-flicker rule, still right), so a frozen meter and a live one were
+  // pixel-identical and the only tell was a hover tooltip. Two windows on one account then quietly
+  // disagree by however much drifted while one of them stopped polling. Say it on EVERY failed poll,
+  // and dim the bars so the numbers themselves read as untrustworthy. (D-058)
   function paintUsageError(d, codex) {
     const e = $('uerr');
-    const blank = !codex && d.session == null && d.week == null;
-    e.hidden = !(blank && d.error);
-    if (!e.hidden) e.textContent = '⚠ ' + d.error;
+    const painted = d.session != null || d.week != null; // a last-good reading is on screen
+    const stale = !codex && !!d.error;                   // ...and the latest poll did not refresh it
     const age = d.checked ? ` · reading from ${agoText(Date.now() - d.checked)} ago` : '';
+    e.hidden = !stale;
+    if (stale) e.textContent = '⚠ ' + d.error + (painted ? ` — showing the last good reading${age}` : '');
+    $('meter').classList.toggle('stale', stale && painted);
     $('meter').title = codex ? 'Codex reports no account usage %'
       : (d.error ? `Last usage check failed: ${d.error}${age}` : (d.checked ? `Usage checked ${agoText(Date.now() - d.checked)} ago` : ''));
   }
@@ -729,13 +741,20 @@
   function reflect() {
     // Never disable Start — a dead button reads as "broken". If the workspace is Off or
     // not a master-plan project, the click still fires and the host explains why.
-    $('run').textContent = running ? '■ Stop' : '▶ Start';
+    // Three controls used to be a variant of "stop"/"abort" and were trivially mixed up (D-057);
+    // each now says WHAT it halts and WHEN. The run toggle escalates on the second click.
+    $('run').textContent = !running ? '▶ Start' : (stopping ? '⏹ Stop now' : '■ Stop after step');
     $('run').classList.toggle('primary', !running);
     $('discard').hidden = !running; // only offer step-discard while a step is in flight (P06-S06)
-    $('abort').hidden = !running;   // hard "Abort run" only while running; ■ Stop (the run toggle) is graceful (P07-S01)
+    $('abort').hidden = !running || stopping; // once the toggle itself reads "⏹ Stop now", don't show two
     $('pause').hidden = !running || engine === 'codex'; // Claude-only manual hold (P07-S02, D-023)
     $('pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
-    $('run').title = running ? 'Graceful stop — finish the current step, then halt' : 'Start the autonomous loop';
+    // ✋ Interrupt is a CHAT control. During a run Pause is the same interrupt done safely (it holds
+    // the step); a raw one desyncs the loop, so the button is not offered while running (D-057).
+    $('stop').hidden = running;
+    $('run').title = !running ? 'Start the autonomous loop'
+      : (stopping ? 'Halt the run now, without finishing the current step'
+                  : 'Finish the current step, then halt — click again to halt immediately');
     // Engine is run-scoped (poller + session bind to it) — lock it while running (P09-S04).
     $('engine').disabled = running;
     $('engine').title = running ? 'Stop the run to switch engine' : 'Engine';
@@ -750,7 +769,14 @@
   // Codex token counter is per-run: zero it at each run start (and on 'done') so a second run
   // never shows the first run's total (P09-S04).
   function resetTokens() { sessionTokens = 0; $('tokval').textContent = '—'; }
-  $('run').onclick = () => { if (!running) resetTokens(); vscode.postMessage({ type: running ? 'stop' : 'start' }); };
+  // The toggle escalates: click 1 = graceful (finish the step, then halt), click 2 = halt now. The
+  // escalation itself lives host-side in Runner.stop() so the command palette gets it too — this
+  // only relabels the button so the escape hatch is visible before you need it (D-057).
+  $('run').onclick = () => {
+    if (!running) { stopping = false; resetTokens(); return vscode.postMessage({ type: 'start' }); }
+    stopping = true; reflect();
+    vscode.postMessage({ type: 'stop' });
+  };
   $('abort').onclick = () => vscode.postMessage({ type: 'abort' }); // hard teardown now (P07-S01)
   $('pause').onclick = () => vscode.postMessage({ type: paused ? 'resume' : 'pause' }); // manual hold (P07-S02)
   $('stop').onclick = () => vscode.postMessage({ type: 'interrupt' });

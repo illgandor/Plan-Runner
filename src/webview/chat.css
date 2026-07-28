@@ -47,6 +47,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-
 .meter .gauge.warn progress::-webkit-progress-value { background: var(--vscode-inputValidation-warningBorder, #d7a500); }
 .meter .gauge.over progress::-webkit-progress-value { background: var(--vscode-inputValidation-errorBorder, #be1100); }
 .meter .gauge.inert { opacity: .5; }  /* a model-scoped limit that can't pause the picked model */
+.meter.stale .gauge { opacity: .45; } /* last poll failed — these numbers are frozen, not current */
 .meter.paused .glabel::after { content: ' ⏸'; }
 /* Why the meter has no reading — only shown when there is nothing to paint (P11 audit). */
 .meter .uerr { font-size: 10px; line-height: 1.35; opacity: .9;

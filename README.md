@@ -69,9 +69,12 @@ the editor's own diff theme; long tool output collapses behind a **show more**.
 
 ### Run controls
 
-- **Stop** — graceful: finishes the current step, then halts the loop cleanly.
-- **Abort run** — hard teardown of the running session immediately, mid-step.
-- **Abort turn** — interrupts just the current turn; the step stays and you can keep going.
+- **Stop after step** — the run toggle, graceful: finishes the current step, then halts cleanly.
+  Click it **again** and it becomes **⏹ Stop now** — the escape hatch for a turn that can't
+  finish on its own (an unanswered permission card, a wedged stream).
+- **Stop now** — halts the whole run immediately, mid-step, without waiting for close-out.
+- **Interrupt** — interrupts the turn in progress. Chat only; during a run use **Pause**, which
+  is the same interrupt done while holding the step.
 - **Pause / Resume** — Claude-only mid-turn hold: interrupts the current turn (session kept)
   and resumes the same step on demand. Hidden when Codex is selected.
 
@@ -80,7 +83,8 @@ the editor's own diff theme; long tool output collapses behind a **show more**.
 - **Usage meter** — live Session, Week (all models) and per-model week account-usage bars, read
   from `claude /usage`; keeps the last good reading rather than blanking on a missing sample.
   The third bar is labelled by whatever model `/usage` names (Fable today), matched by shape so
-  a rename can't silently blank it.
+  a rename can't silently blank it. When a poll fails the bars **dim** and a ⚠ line says why and
+  how old the reading is — a frozen meter never passes itself off as a live one.
 - **Global pause thresholds** — each bar has its own pause % in ⚙ Settings, and all three apply
   to *every* window/project (VS Code application-scoped settings). The per-model limit is scoped
   to the model you picked — it never holds a run on a different model.

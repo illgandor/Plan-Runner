@@ -90,3 +90,68 @@ test('graceful Stop with no live turn (idle/gating/paused) halts now', () => {
     assert.strictEqual(calls.stop, 1, 'session torn down');
   } finally { restore(); }
 });
+
+// D-057. The graceful branch can only end at a turn end, so a turn that never ends (an unanswered
+// permission card, a wedged stream, a provider child killed out from under the loop) used to make
+// EVERY further Stop click a no-op — the reported "I clicked stop and had to close VS Code".
+test('a SECOND Stop escalates to a hard halt when the turn never ends', () => {
+  const { calls, restore } = fakeSession();
+  try {
+    const { project } = tempProject('P07-S01');
+    const r = new Runner(project);
+    const dones = [];
+    r.on('done', (d) => dones.push(d.detail));
+
+    r.start();
+    r.stop(); // graceful — the turn is still live and never ends
+    assert.strictEqual(r.running, true, 'first Stop waits for the step');
+    assert.strictEqual(calls.stop, 0, 'and keeps the session');
+
+    r.stop(); // second click: escape hatch
+    assert.strictEqual(r.running, false, 'second Stop halts now');
+    assert.strictEqual(calls.stop, 1, 'session torn down');
+    assert.ok(dones.some((d) => /Stopped now/.test(d)), `named the escalation (got ${JSON.stringify(dones)})`);
+  } finally { restore(); }
+});
+
+// A raw provider.interrupt() during a run is invisible to the loop: the turn-end it produces reads
+// as a COMPLETED turn, so the runner advanced past the step or retried it. interruptTurn() routes
+// through _pause so the `paused` guard in _onTurnEnd drops that turn-end instead.
+test('interruptTurn holds the step instead of letting the loop read a completed turn', () => {
+  const { calls, restore } = fakeSession();
+  try {
+    const { dir, project } = tempProject('P07-S01');
+    const r = new Runner(project);
+    r.finalizeMs = 0;
+    r.start();
+
+    assert.strictEqual(r.interruptTurn(), true, 'a live Claude turn is interruptible');
+    assert.strictEqual(calls.interrupt, 1, 'the turn was interrupted');
+    assert.strictEqual(calls.stop, 0, 'but the session is kept for resume');
+    assert.strictEqual(r.paused, true, 'the step is held, not finished');
+
+    // The interrupt's turn-end now arrives. Even with the pointer advanced, the loop must NOT
+    // treat it as a finished step and run the next one.
+    fs.writeFileSync(path.join(dir, 'PROGRESS.md'), '## ▶ NEXT STEP\nNEXT: P07-S02\n');
+    endTurn(calls);
+    assert.strictEqual(calls.start.length, 1, 'no next step started off an interrupted turn');
+    assert.strictEqual(r.running, true, 'the run is still live, holding the same step');
+  } finally { restore(); }
+});
+
+test('interruptTurn refuses when there is nothing safe to interrupt', () => {
+  const { restore } = fakeSession();
+  try {
+    const { project } = tempProject('P07-S01');
+    const idle = new Runner(project);
+    assert.strictEqual(idle.interruptTurn(), false, 'not running → nothing to interrupt');
+
+    // Codex has no mid-turn interrupt that keeps the loop coherent (D-023): its child dies emitting
+    // nothing, so _onTurnEnd never fires and the loop would hang with _turnLive stuck true. State is
+    // set directly rather than start()ed — a codex runner would spawn the real `codex` binary.
+    const cx = new Runner({ ...project, engine: 'codex' });
+    cx.running = true; cx._turnLive = true;
+    assert.strictEqual(cx.interruptTurn(), false, 'refused on Codex');
+    assert.strictEqual(cx.paused, false, 'and left the turn alone');
+  } finally { restore(); }
+});

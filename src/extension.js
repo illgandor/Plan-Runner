@@ -314,7 +314,13 @@ async function onMessage(m) {
         options: { model: p.model, effort: p.effort, permissionMode: p.mode } }); // p.* already mapped via effectiveModel/Effort
       break;
     case 'interrupt':
-      if (p) engine.provider(p.engine).interrupt(p.id);
+      // During a RUN this must go through the runner (interruptTurn → the manual-pause path): a raw
+      // provider.interrupt() never tells the loop, and the turn-end it produces reads as a completed
+      // turn — the loop advances past the step or retries it, and Stop then can't reach it. The
+      // webview hides ✋ Interrupt while running; this is the host-side backstop. No run → plain
+      // chat, where the raw interrupt is exactly right (there is no loop to desync).
+      if (runner && runner.running) runner.interruptTurn();
+      else if (p) engine.provider(p.engine).interrupt(p.id);
       break;
     case 'discard': {
       // P06-S06: roll this step's file edits back to step start. Confirm modally (webview
