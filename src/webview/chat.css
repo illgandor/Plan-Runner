@@ -225,7 +225,9 @@ body.hacker {
   --vscode-font-family: "Lucida Console", Consolas, "Courier New", monospace;
   --vscode-editor-font-family: "Lucida Console", Consolas, "Courier New", monospace;
   --vscode-foreground: #00ff41;
-  --vscode-sideBar-background: #000; --vscode-editor-background: #000;
+  --vscode-sideBar-background: #000;
+  --vscode-editor-background: rgba(0,14,0,.55);   /* only .msg.assistant reads this — lets the rain
+                                                     show behind message bubbles instead of masking it */
   --vscode-editorWidget-background: #050d05; --vscode-input-background: #000;
   --vscode-dropdown-background: #000; --vscode-dropdown-border: #00b32c;
   --vscode-input-foreground: #00ff41; --vscode-input-border: #00b32c;
@@ -254,10 +256,14 @@ body.hacker #app::after {
 @keyframes crt { 0%,100% { opacity: .85 } 47% { opacity: .72 } 52% { opacity: .95 } }
 body.hacker .status::after { content: " \2588"; animation: blink 1.06s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0 } }
-/* Matrix rain. z-index:-1 paints it above #app's background but under every in-flow child, which
-   needs #app to be a stacking context — hence the z-index:0 + its own background, hacker-only. */
+/* Matrix rain. Fixed to the VIEWPORT, not absolute inside #app: as a flex child it collapsed to
+   its bitmap size and fell in a band across the meter. Layering is explicit (canvas 0, sections 1)
+   rather than a negative z-index, which depended on #app being a stacking context. The panel's
+   sections are transparent in this skin, so the rain falls behind the whole terminal — hence the
+   low opacity: it sits under live text you actually have to read at 3am. */
 #rain { display: none; }
-body.hacker #app { z-index: 0; background: #000; }
-body.hacker #rain { display: block; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .55; }
+body.hacker #rain { display: block; position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .16; }
+body.hacker .bar, body.hacker .meter, body.hacker .status,
+body.hacker .presence, body.hacker #log, body.hacker .composer { position: relative; z-index: 1; }
 /* BIOS dump: left-aligned and pre-wrapped, unlike the centered .msg.system it borrows from. */
 body.hacker .msg.boot { align-self: stretch; text-align: left; white-space: pre; overflow-x: auto; opacity: .95; }

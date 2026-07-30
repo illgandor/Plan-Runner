@@ -47,6 +47,8 @@
   const $ = (id) => document.getElementById(id);
   const log = $('log');
   const logoUri = app.dataset.logo || '';   // webview URI of src/webview/logo.png (from html())
+  const logoHackerUri = app.dataset.logoHacker || '';   // the alternate skin's logo (same folder)
+  const logoSrc = () => (document.body.classList.contains('hacker') && logoHackerUri) || logoUri;
   let enabled = false, running = false, engine = 'claude', paused = false;
   let stopping = false;  // a graceful Stop is pending — the toggle now reads "⏹ Stop now" (D-057)
   let autoSkipSec = 0;   // >0 → question cards auto-Skip after this many seconds (D-028; never permissions)
@@ -97,7 +99,7 @@
       s.appendChild(document.createElement('div')).className = 'splash-line';
       if (logoUri) {
         const img = document.createElement('img');
-        img.className = 'splash-logo'; img.src = logoUri; img.alt = 'Plan Runner';
+        img.className = 'splash-logo'; img.src = logoSrc(); img.alt = 'Plan Runner';
         img.onerror = () => img.remove();          // asset missing → hide gracefully
         s.appendChild(img);
       }
@@ -548,10 +550,11 @@
   const GLYPH = 'アイウエオカキクケコサシスセソタチツテト0123456789ABCDEF$#%&*<>/\\';
   const CELL = 14;
   let rainTimer = null, drops = [];
+  // innerWidth/Height fallback: an early call could measure 0 and bail, leaving `drops` empty and
+  // the canvas blank until the next resize.
   function rainSize() {
     const c = $('rain');
-    if (!c.clientWidth) return;
-    c.width = c.clientWidth; c.height = c.clientHeight;
+    c.width = c.clientWidth || innerWidth; c.height = c.clientHeight || innerHeight;
     drops = new Array(Math.ceil(c.width / CELL)).fill(0).map(() => -Math.random() * 40 | 0);
   }
   addEventListener('resize', () => { if (rainTimer) rainSize(); });
@@ -577,6 +580,7 @@
     if (on === hk()) return;                 // idempotent: config + settings both call this
     document.body.classList.toggle('hacker', on);
     relabel(on); rain(on);
+    document.querySelectorAll('.splash-logo, .help-logo').forEach((i) => { i.src = logoSrc(); }); // already-built ones
     if (on) boot(); else stopBoot();
   }
   // =============================== end hacker mode ===============================
@@ -680,7 +684,7 @@
       bar.appendChild(close); v.appendChild(bar);
       if (logoUri) {
         const img = document.createElement('img');
-        img.className = 'help-logo'; img.src = logoUri; img.alt = 'Plan Runner';
+        img.className = 'help-logo'; img.src = logoSrc(); img.alt = 'Plan Runner';
         img.onerror = () => img.remove();         // asset missing → hide gracefully
         v.appendChild(img);
       }
