@@ -217,3 +217,47 @@ details.think summary { cursor: pointer; opacity: .7; }
 .composer .row { display: flex; gap: 6px; align-items: center; }
 .composer button { font: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--vscode-panel-border); background: transparent; color: var(--vscode-foreground); }
 .composer button.send { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; margin-left: auto; }
+
+/* ---- HACKER MODE (undocumented): finalizeQuietSeconds === 69 puts `hacker` on <body>. ----
+   Skin only — every rule above already reads --vscode-* tokens, so redefining the tokens on
+   body.hacker repaints the entire panel (bars, meter, popovers, diffs) with no rules of its own. */
+body.hacker {
+  --vscode-font-family: "Lucida Console", Consolas, "Courier New", monospace;
+  --vscode-editor-font-family: "Lucida Console", Consolas, "Courier New", monospace;
+  --vscode-foreground: #00ff41;
+  --vscode-sideBar-background: #000; --vscode-editor-background: #000;
+  --vscode-editorWidget-background: #050d05; --vscode-input-background: #000;
+  --vscode-dropdown-background: #000; --vscode-dropdown-border: #00b32c;
+  --vscode-input-foreground: #00ff41; --vscode-input-border: #00b32c;
+  --vscode-panel-border: #00752a; --vscode-focusBorder: #00ff41;
+  --vscode-button-background: #003b12; --vscode-button-foreground: #00ff41;
+  --vscode-badge-background: #00ff41; --vscode-badge-foreground: #000;
+  --vscode-textLink-foreground: #7cff9e; --vscode-charts-green: #00ff41;
+  --vscode-progressBar-background: #00ff41;
+  --vscode-textCodeBlock-background: #061206;
+  --vscode-list-hoverBackground: #06210c;
+  --vscode-inputValidation-warningForeground: #ffd400;
+  --vscode-inputValidation-warningBackground: #1a1500; --vscode-inputValidation-warningBorder: #ffd400;
+  --vscode-inputValidation-errorBackground: #1e0000; --vscode-inputValidation-errorBorder: #ff3b3b;
+  --vscode-diffEditor-removedTextBackground: rgba(255,59,59,.22);
+  --vscode-diffEditor-insertedTextBackground: rgba(0,255,65,.18);
+  background: #000; text-shadow: 0 0 6px rgba(0,255,65,.45);   /* phosphor bloom */
+  letter-spacing: .3px;
+}
+/* CRT scanlines + a slow flicker. Overlay only — pointer-events:none so nothing is unclickable,
+   and the flicker is deliberately shallow: this panel runs unattended all night. */
+body.hacker #app::after {
+  content: ""; position: absolute; inset: 0; z-index: 100; pointer-events: none;
+  background: repeating-linear-gradient(rgba(0,0,0,.28) 0 1px, transparent 1px 3px);
+  animation: crt 5.5s ease-in-out infinite;
+}
+@keyframes crt { 0%,100% { opacity: .85 } 47% { opacity: .72 } 52% { opacity: .95 } }
+body.hacker .status::after { content: " \2588"; animation: blink 1.06s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0 } }
+/* Matrix rain. z-index:-1 paints it above #app's background but under every in-flow child, which
+   needs #app to be a stacking context — hence the z-index:0 + its own background, hacker-only. */
+#rain { display: none; }
+body.hacker #app { z-index: 0; background: #000; }
+body.hacker #rain { display: block; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .55; }
+/* BIOS dump: left-aligned and pre-wrapped, unlike the centered .msg.system it borrows from. */
+body.hacker .msg.boot { align-self: stretch; text-align: left; white-space: pre; overflow-x: auto; opacity: .95; }

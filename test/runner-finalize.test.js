@@ -104,6 +104,31 @@ test('finalize window is 0 for Codex, configured for Claude', () => {
   assert.equal(claude._finalizeWindowMs, 120000, 'Claude keeps the configured window');
 });
 
+// The panel reskins itself on one particular value of this setting. That is a webview concern:
+// the Runner must treat every value in the 0-600 range identically — hold exactly that long, then
+// tear down and advance. Guards against anyone ever "helping" by special-casing the number here.
+test('69s is an ordinary settle window — the panel-side skin never reaches the loop', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setImmediate'] });
+  const p = tempProject('S1');
+  const { calls, restore } = fakeAdvancing(p.path, 'S2');
+  try {
+    const r = new Runner(p);
+    r.finalizeMs = 69000;
+    r.gitCheck = () => ({ clean: true, pushed: true });
+    const events = [];
+    for (const e of ['status', 'step-done']) r.on(e, (d) => events.push({ e, ...d }));
+
+    r.start();
+    assert.equal(r._finalizeWindowMs, 69000, 'the window is exactly what was configured');
+    assert.equal(r.finalizing, true, 'settles like any other value');
+    t.mock.timers.tick(68999);
+    assert.equal(calls.stop, 0, 'still settling one ms before the window closes');
+    t.mock.timers.tick(1);
+    assert.equal(calls.stop, 1, 'torn down exactly once, on time');
+    assert.ok(events.some((x) => x.e === 'step-done' && x.from === 'S1' && x.to === 'S2'), 'advances normally');
+  } finally { restore(); }
+});
+
 test('handoff guard: dirty tree blocks the advance → needs-you, session kept alive', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'setImmediate'] });
   const p = tempProject('S1');

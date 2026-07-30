@@ -6,6 +6,7 @@
 
   // ---- Layout ----
   app.innerHTML = `
+    <canvas id="rain"></canvas>
     <div class="bar">
       <button id="run" class="primary">▶ Start</button>
       <select id="engine" title="Engine"></select>
@@ -299,7 +300,7 @@
         stopThink(); turnStats(m);                 // freeze thinking timer; append the muted stats line (P09-S14)
         cur = null; toolEls.clear();               // finalize this turn's group
         break;
-      case 'error': stopThink(); bubble('error', m.message || 'Error'); cur = null; break;
+      case 'error': stopThink(); bubble('error', (hk() ? 'ACCESS DENIED — ' : '') + (m.message || 'Error')); cur = null; break;
     }
   }
   function fmt(n) { return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n); }
@@ -447,15 +448,18 @@
         decorateDefault($('model'), d.defaultModelResolved); decorateDefault($('effort'), d.defaultEffort);
         if (d.version) $('ver').textContent = 'v' + d.version;
         autoSkipSec = d.autoSkipQuestionSeconds || 0;
-        engine = d.engine; enabled = d.enabled; reflect(); break;
+        engine = d.engine; enabled = d.enabled;
+        hacker(d.finalizeQuietSeconds);   // survives a panel reload / another window's edit
+        reflect(); break;
       case 'enabled': enabled = d.value; reflect(); break;
       case 'status':
         setStatus(d); running = d.state === 'running' || d.state === 'needs-you' || d.state === 'finalizing'; reflect();
         if (d.state === 'needs-you') { const el = ensureAssistant(); } // keep group open for the answer
         break;
-      case 'step-started': stepChip('▶ ' + (d.step || 'step')); cur = null; break;
-      case 'step-done': stepChip(`✔ ${d.from} → ${d.to}`); cur = null; break;
-      case 'done': system('■ ' + (d.detail || d.state)); running = false; paused = false; stopping = false; resetTokens(); reflect(); break;
+      case 'step-started': stepChip(hk() ? `▶ BREACHING ${d.step || 'NODE'}` : '▶ ' + (d.step || 'step')); cur = null; break;
+      case 'step-done': stepChip(hk() ? `ACCESS GRANTED · ${d.from} → ${d.to}` : `✔ ${d.from} → ${d.to}`); cur = null; break;
+      case 'done': system((hk() ? (d.state === 'error' ? '⚠ ACCESS DENIED — ' : '■ CONNECTION TERMINATED — ') : '■ ')
+        + (d.detail || d.state)); running = false; paused = false; stopping = false; resetTokens(); reflect(); break;
       case 'usage': usage(d); break;
       case 'paused': paused = true; reflect(); setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
       case 'resumed': paused = false; reflect(); setStatus({ state: 'running', detail: 'Resumed' }); break;
@@ -485,7 +489,100 @@
     { key: 'autoSkipQuestionSeconds', label: 'Auto-skip question (seconds, 0 = off)', min: 0, max: 3600 },
   ];
   function closeSettings() { $('settingsmenu').hidden = true; }
+
+  // ================= HACKER MODE (undocumented — see HACKER_MODE.md, gitignored) =================
+  // Set the finalize-quiet window to 69s and the panel goes green-on-black. It is a SKIN: a body
+  // class, a label table and a canvas. Nothing here touches the loop, and 69 is an ordinary value
+  // in the 0–600 range, so the settle window really does wait 69 seconds. Any other value undoes it.
+  const hk = () => document.body.classList.contains('hacker');
+  // Static-button vocabulary. `hx` is identity when the mode is off, so each call site is a wrap.
+  const HACKER_WORDS = {
+    '▶ Start': '> EXECUTE', '■ Stop after step': '# HALT AFTER PAYLOAD', '⏹ Stop now': '!! ABORT',
+    '⏸ Pause': '|| SUSPEND', '▶ Resume': '> RESUME', '📎 Attach': '📎 UPLOAD', '🔌 MCP': '🔌 UPLINK',
+    '⚙ Settings': '⚙ CONFIG.SYS', '? Help': '? MANPAGE', '✋ Interrupt': '✋ KILL -9', 'Send': 'TRANSMIT',
+    '↓ New': '↓ INCOMING',
+  };
+  // Status line: keyed on `state` (a small enum) — `detail` is free-form and still shown, so the
+  // step name is never lost. Reads as "INFILTRATING NODE — Running P12-S01".
+  const HACKER_STATE = {
+    running: 'INFILTRATING NODE', finalizing: 'COVERING TRACKS', 'needs-you': 'AWAITING OPERATOR',
+    paused: 'SIGNAL COLD', done: 'MISSION COMPLETE', error: 'INTRUSION FAILED',
+  };
+  const hx = (t) => (hk() && HACKER_WORDS[t]) || t;
+  const RELABEL = ['attach', 'mcp', 'settings', 'help', 'abort', 'stop', 'send', 'jump']; // run/pause are reflect()'s
+  function relabel(on) {
+    RELABEL.forEach((id) => {
+      const b = $(id); if (!b) return;
+      if (!b.dataset.plain) b.dataset.plain = b.textContent;
+      b.textContent = on ? (HACKER_WORDS[b.dataset.plain] || b.dataset.plain) : b.dataset.plain;
+    });
+    const ta = $('input');
+    if (!ta.dataset.plain) ta.dataset.plain = ta.placeholder;
+    ta.placeholder = on ? 'root@plan-runner:~# _' : ta.dataset.plain;
+    reflect();   // run/pause labels are computed there — let it re-derive them through hx()
+  }
+  // Fake POST dump, typed out. Purely decorative; it goes in the log like any other system line.
+  let bootTimer = null;
+  function stopBoot() { clearInterval(bootTimer); bootTimer = null; }
+  function boot() {
+    const text = [
+      `PLAN RUNNER BIOS ${$('ver').textContent || ''} — NOT A CULT LLC`,
+      'MEMORY TEST ................ 640K OK',
+      'DETECTING UPLINK ........... OK',
+      'BYPASSING ICE .............. OK',
+      'DECRYPTING MASTER PLAN ..... OK',
+      'ROOT SHELL ACQUIRED',
+      '',
+      '◤ ACCESS GRANTED — HACKER MODE ENGAGED ◢',
+    ].join('\n');
+    const el = bubble('system boot', '');
+    let i = 0;
+    stopBoot();
+    bootTimer = setInterval(() => {
+      el.textContent = text.slice(0, i += 3); scroll();
+      if (i >= text.length) stopBoot();
+    }, 24);
+  }
+  // Matrix rain, deliberately cheap: ~11fps and fully stopped while the panel is hidden — this
+  // thing is left running unattended overnight, so a gag must not cost a core.
+  const GLYPH = 'アイウエオカキクケコサシスセソタチツテト0123456789ABCDEF$#%&*<>/\\';
+  const CELL = 14;
+  let rainTimer = null, drops = [];
+  function rainSize() {
+    const c = $('rain');
+    if (!c.clientWidth) return;
+    c.width = c.clientWidth; c.height = c.clientHeight;
+    drops = new Array(Math.ceil(c.width / CELL)).fill(0).map(() => -Math.random() * 40 | 0);
+  }
+  addEventListener('resize', () => { if (rainTimer) rainSize(); });
+  function rain(on) {
+    const c = $('rain');
+    if (rainTimer) { clearInterval(rainTimer); rainTimer = null; }
+    if (!on || document.hidden) { c.getContext('2d').clearRect(0, 0, c.width, c.height); return; }
+    rainSize();
+    const ctx = c.getContext('2d');
+    rainTimer = setInterval(() => {
+      ctx.fillStyle = 'rgba(0,0,0,.14)'; ctx.fillRect(0, 0, c.width, c.height);   // trail fade
+      ctx.fillStyle = '#00ff41'; ctx.font = CELL + 'px monospace';
+      drops.forEach((y, i) => {
+        ctx.fillText(GLYPH[Math.random() * GLYPH.length | 0], i * CELL, y * CELL);
+        drops[i] = (y * CELL > c.height && Math.random() > .975) ? 0 : y + 1;
+      });
+    }, 90);
+  }
+  // Guarded so the normal (non-hacker) panel does literally nothing on a visibility change.
+  document.addEventListener('visibilitychange', () => { if (hk() || rainTimer) rain(hk()); });
+  function hacker(sec) {
+    const on = Number(sec) === 69;
+    if (on === hk()) return;                 // idempotent: config + settings both call this
+    document.body.classList.toggle('hacker', on);
+    relabel(on); rain(on);
+    if (on) boot(); else stopBoot();
+  }
+  // =============================== end hacker mode ===============================
+
   function renderSettings(values) {
+    hacker(values.finalizeQuietSeconds);   // flips the instant you commit the field
     const menu = $('settingsmenu');
     menu.innerHTML = '';
     const head = document.createElement('div');
@@ -730,7 +827,9 @@
   }
   let lastState;
   function setStatus(d) {
-    const s = $('status'); s.textContent = d.detail || d.state;
+    const s = $('status');
+    const phrase = hk() && HACKER_STATE[d.state];   // detail rides along, so the step is never lost
+    s.textContent = phrase ? `${phrase} — ${d.detail || d.state}` : (d.detail || d.state);
     s.className = 'status' + (d.state === 'needs-you' ? ' needs-you' : '');
     // On ENTERING needs-you, pull attention to the banner and put the cursor in the
     // composer. Guard on the transition so a repeated needs-you doesn't steal focus mid-answer.
@@ -742,11 +841,11 @@
     // not a master-plan project, the click still fires and the host explains why.
     // Three controls used to be a variant of "stop"/"abort" and were trivially mixed up (D-057);
     // each now says WHAT it halts and WHEN. The run toggle escalates on the second click.
-    $('run').textContent = !running ? '▶ Start' : (stopping ? '⏹ Stop now' : '■ Stop after step');
+    $('run').textContent = hx(!running ? '▶ Start' : (stopping ? '⏹ Stop now' : '■ Stop after step'));
     $('run').classList.toggle('primary', !running);
     $('abort').hidden = !running || stopping; // once the toggle itself reads "⏹ Stop now", don't show two
     $('pause').hidden = !running || engine === 'codex'; // Claude-only manual hold (P07-S02, D-023)
-    $('pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
+    $('pause').textContent = hx(paused ? '▶ Resume' : '⏸ Pause');
     // ✋ Interrupt is a CHAT control. During a run Pause is the same interrupt done safely (it holds
     // the step); a raw one desyncs the loop, so the button is not offered while running (D-057).
     $('stop').hidden = running;

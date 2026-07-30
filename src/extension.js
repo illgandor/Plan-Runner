@@ -158,7 +158,8 @@ function sendConfig() {
     engines: ENGINES, models: c.models, efforts: c.efforts, modes: c.permissionModes,
     // The expanded "default - …" labels: what Plan Runner's default model/effort resolve to (S0093).
     defaultModelResolved: defaultModelResolved(), defaultEffort: state.engine === 'claude' ? PR_DEFAULT_EFFORT : null,
-    autoSkipQuestionSeconds: vscode.workspace.getConfiguration('planRunner').get('autoSkipQuestionSeconds', 0) });
+    autoSkipQuestionSeconds: vscode.workspace.getConfiguration('planRunner').get('autoSkipQuestionSeconds', 0),
+    finalizeQuietSeconds: usageConfig().finalizeSec });   // panel-side only; 69 is not a number the loop treats specially
 }
 // §Config keys — application-scoped, read the same in every window (D-004).
 function usageConfig() {
@@ -549,8 +550,10 @@ function activate(context) {
       if (['pauseThresholdPct', 'pauseWeekThresholdPct', 'pauseFableThresholdPct', 'usagePollSeconds']
         .some((k) => e.affectsConfiguration('planRunner.' + k)))
         usage.setConfig(usageConfig()); // re-applies + emits 'update' → postUsage repaints
-      if (e.affectsConfiguration('planRunner.finalizeQuietSeconds') && runner)
-        runner.finalizeMs = usageConfig().finalizeSec * 1000; // live-apply the settle window
+      if (e.affectsConfiguration('planRunner.finalizeQuietSeconds')) {
+        if (runner) runner.finalizeMs = usageConfig().finalizeSec * 1000; // live-apply the settle window
+        sendConfig();                                                     // and re-post it to the panel
+      }
       if (e.affectsConfiguration('planRunner.stallNotifySeconds') && runner)
         runner.stallMs = vscode.workspace.getConfiguration('planRunner').get('stallNotifySeconds', 0) * 1000;
       if (e.affectsConfiguration('planRunner.autoSkipQuestionSeconds')) sendConfig(); // re-post so the webview picks up the new value
