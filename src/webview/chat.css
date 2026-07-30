@@ -256,14 +256,21 @@ body.hacker #app::after {
 @keyframes crt { 0%,100% { opacity: .85 } 47% { opacity: .72 } 52% { opacity: .95 } }
 body.hacker .status::after { content: " \2588"; animation: blink 1.06s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0 } }
-/* Matrix rain. Fixed to the VIEWPORT, not absolute inside #app: as a flex child it collapsed to
-   its bitmap size and fell in a band across the meter. Layering is explicit (canvas 0, sections 1)
-   rather than a negative z-index, which depended on #app being a stacking context. The panel's
-   sections are transparent in this skin, so the rain falls behind the whole terminal — hence the
-   low opacity: it sits under live text you actually have to read at 3am. */
+/* Matrix rain. The width/height are NOT redundant with inset:0 — <canvas> is a replaced element,
+   so an absolutely/fixed positioned one with `width:auto` uses its INTRINSIC size and ignores
+   right/bottom entirely (CSS 2.1 10.3.8 / 10.6.5). Without them it renders at the canvas default
+   300x150 in the top-left corner, which reads as a band across the usage meter. Layering is
+   explicit (canvas 0, sections 1) rather than a negative z-index, which needed #app to be a
+   stacking context. Low opacity because the panel's sections are transparent over it: the rain
+   sits under live text you actually have to read at 3am. */
 #rain { display: none; }
-body.hacker #rain { display: block; position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .16; }
+body.hacker #rain {
+  display: block; position: fixed; inset: 0; width: 100%; height: 100%;
+  z-index: 0; pointer-events: none; opacity: .16;
+}
 body.hacker .bar, body.hacker .meter, body.hacker .status,
 body.hacker .presence, body.hacker #log, body.hacker .composer { position: relative; z-index: 1; }
+/* The composer stays a solid block — the rain covers everything above it, not the typing area. */
+body.hacker .composer { background: #000; }
 /* BIOS dump: left-aligned and pre-wrapped, unlike the centered .msg.system it borrows from. */
 body.hacker .msg.boot { align-self: stretch; text-align: left; white-space: pre; overflow-x: auto; opacity: .95; }

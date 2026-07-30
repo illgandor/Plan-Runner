@@ -550,11 +550,12 @@
   const GLYPH = 'アイウエオカキクケコサシスセソタチツテト0123456789ABCDEF$#%&*<>/\\';
   const CELL = 14;
   let rainTimer = null, drops = [];
-  // innerWidth/Height fallback: an early call could measure 0 and bail, leaving `drops` empty and
-  // the canvas blank until the next resize.
+  // Measure the VIEWPORT, not the element. The canvas is fixed at 100%/100% so they agree — but
+  // reading clientWidth made the bug self-reinforcing: a replaced element sized 300x150 reported
+  // 300, which then became the bitmap size, which kept it 300 forever.
   function rainSize() {
     const c = $('rain');
-    c.width = c.clientWidth || innerWidth; c.height = c.clientHeight || innerHeight;
+    c.width = innerWidth; c.height = innerHeight;
     drops = new Array(Math.ceil(c.width / CELL)).fill(0).map(() => -Math.random() * 40 | 0);
   }
   addEventListener('resize', () => { if (rainTimer) rainSize(); });
