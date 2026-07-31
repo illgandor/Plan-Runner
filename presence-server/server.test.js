@@ -65,6 +65,22 @@ test('heartbeat is stored and read back with the SERVER timestamp', async () => 
   } finally { await s.close(); }
 });
 
+// A-P10-09: `waiting` and `paused` join the enum so the dashboard can stop calling a step that is
+// stuck on a question a live run. An old client still beats running/idle — the set only grew.
+test('the widened state enum is accepted and read back verbatim', async () => {
+  const s = await start({ now: () => 2000 });
+  try {
+    for (const state of ['running', 'waiting', 'paused', 'idle']) {
+      assert.strictEqual((await s.beat({ project: PROJECT, user: state, step: 'P03-S10', state })).status, 204);
+    }
+    const got = (await (await s.peers()).json()).peers.map((p) => p.state).sort();
+    assert.deepStrictEqual(got, ['idle', 'paused', 'running', 'waiting']);
+    // Still an enum, not a free string: anything else is a 400 and stores nothing.
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Mallory', state: 'stalled' })).status, 400);
+    assert.strictEqual((await (await s.peers()).json()).peers.length, 4);
+  } finally { await s.close(); }
+});
+
 test('a record older than 3 missed beats is dropped on read', async () => {
   let now = 0;
   const s = await start({ now: () => now });

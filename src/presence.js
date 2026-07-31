@@ -9,6 +9,24 @@ const { projectId, presenceConfig } = require('./presence-id');
 
 const TIMEOUT_MS = 5000; // §Presence: hard per-request timeout, <=5s
 
+// §Presence D-044, amended A-P10-09. `running` used to be everything that wasn't `idle`, and the
+// caller derived it from "does this panel have a step id" — so a step waiting on an answer, or held
+// on the usage gate, beat `running` for as long as the window stayed open. Two people then read a
+// dashboard that could not tell a live run from one stalled two days ago. Anything outside this set
+// beats as `idle`: a garbled value must never reach the server, which 400s it and drops the beat.
+const STATES = new Set(['running', 'waiting', 'paused', 'idle']);
+
+// One beat's state, taken from the runner's OWN flags rather than from the presence of a step id.
+// No step = idle, whatever the runner thinks. A hold outranks a question: a paused window is not
+// about to answer one. Pure + exported so the mapping is a unit test, not a claim in extension.js
+// (which no test can load — it requires the vscode module).
+function runState({ step, paused, needsYou } = {}) {
+  if (!step) return 'idle';
+  if (paused) return 'paused';
+  if (needsYou) return 'waiting';
+  return 'running';
+}
+
 // §Presence display name (D-042): the setting, else `git config user.name`, else "someone".
 // Never an email, never the OS username.
 function displayName(name, cwd, exec) {
@@ -52,7 +70,7 @@ async function heartbeat({ state, step } = {}, opts = {}) {
       method: 'POST',
       body: JSON.stringify({
         project: ctx.project, user: ctx.user, step: step || null,
-        state: state === 'running' ? 'running' : 'idle', ts: Date.now(),
+        state: STATES.has(state) ? state : 'idle', ts: Date.now(),
       }),
     });
     return res.ok ? true : null;
@@ -136,7 +154,10 @@ function startPresence(opts = {}) {
       if (ctx) opt = { ...opts, ctx };
     }
     if (!ok) return;
-    const st = state === 'running' ? 'running' : 'idle';
+    // Only a LIVE run earns the 60s cadence; waiting and paused burn nothing, so they beat at the
+    // idle 300s — still 3 beats inside the 900s expiry. A transition re-keys and ticks immediately
+    // (below), so nobody waits five minutes to see that a step started asking.
+    const st = STATES.has(state) ? state : 'idle';
     const ms = visible ? (st === 'running' ? RUNNING_MS : IDLE_MS) : 0;
     const key = `${ms}|${st}|${step || ''}`;
     if (key === last) return; // same cadence AND same step → let the running timer be
@@ -152,5 +173,6 @@ function startPresence(opts = {}) {
 }
 
 module.exports = {
-  heartbeat, peers, reportUsage, displayName, startPresence, TIMEOUT_MS, RUNNING_MS, IDLE_MS,
+  heartbeat, peers, reportUsage, displayName, startPresence, runState,
+  TIMEOUT_MS, RUNNING_MS, IDLE_MS, STATES,
 };

@@ -144,11 +144,17 @@ function readBody(req) {
 // so MAX_FIELD is orders of magnitude of headroom, and without it MAX_BODY allowed a 64KB name
 // straight into the state file and onto the dashboard.
 const str = (v, min = 1) => typeof v === 'string' && v.length >= min && v.length <= MAX_FIELD;
+// §Presence D-044 (A-P10-09): `running` is a step actually in flight; `waiting` is one asking its
+// owner something; `paused` is a hold (usage gate or manual); `idle` is a panel with no live run.
+// A superset of the original two, so a client from before the amendment still validates — but a
+// client that sends the new values to a server from before it gets a 400 and vanishes from the
+// dashboard, which is why the server is deployed first.
+const STATES = new Set(['running', 'waiting', 'paused', 'idle']);
 function valid(b) {
   return !!b && typeof b === 'object'
     && str(b.project) && str(b.user)
     && (b.step === null || b.step === undefined || str(b.step, 0))
-    && (b.state === 'running' || b.state === 'idle');
+    && STATES.has(b.state);
 }
 
 // §Account usage POST body. A percentage is 0–100 or null — null means "not known", and it stays

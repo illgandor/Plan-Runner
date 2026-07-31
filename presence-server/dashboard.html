@@ -21,6 +21,7 @@ p { margin: 0 0 1rem }
 table { border-collapse: collapse; width: 100% }
 td { padding: .1rem .6rem .1rem 0; vertical-align: top }
 .live { color: #2ea043; font-weight: 600; white-space: nowrap }
+.live.hold { color: #d29922 }   /* waiting/paused: live panel, nothing being spent */
 .step { font-family: ui-monospace, monospace; opacity: .75 }
 .when { text-align: right; white-space: nowrap; opacity: .6 }
 button { font: inherit; cursor: pointer }
@@ -48,6 +49,15 @@ An empty row means &ldquo;no evidence&rdquo;, never &ldquo;nobody worked on it&r
 <script nonce="%NONCE%">
 'use strict';
 var KEY = 'plan-runner-presence-token', WINDOW_MS = 30 * 86400000;
+// [label, class] per §Presence state. Green is reserved for a step actually in flight — the whole
+// point of the amendment is that "someone is on it" and "someone is stuck on it" stop looking alike.
+// An unknown value from a newer client still renders, in green, rather than silently reading idle.
+var STATE = {
+  running: ['● running', 'live'],
+  waiting: ['◐ waiting on an answer', 'live hold'],
+  paused: ['❚❚ paused', 'live hold'],
+  idle: ['● idle', 'live'],
+};
 var showAll = false, timer = null;
 
 function status(t) { document.getElementById('status').textContent = t; }
@@ -136,8 +146,8 @@ function render(projects) {
     people.forEach(function (r) {
       var l = live[r.user], tr = document.createElement('tr');
       tr.appendChild(el('td', r.user));
-      tr.appendChild(el('td', l ? (l.state === 'running' ? '● running' : '● idle') : '',
-        l ? 'live' : 'dim'));
+      var s = l ? (STATE[l.state] || ['● ' + l.state, 'live']) : ['', 'dim'];
+      tr.appendChild(el('td', s[0], s[1]));
       tr.appendChild(el('td', (l && l.step) || r.step || '', 'step'));
       tr.appendChild(el('td', l ? 'now' : ago(r.lastSeen), 'when'));
       table.appendChild(tr);

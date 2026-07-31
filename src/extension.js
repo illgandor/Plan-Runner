@@ -13,7 +13,7 @@ const { isMasterPlan, readPointer, readPlanFraction } = require('./progress');
 const skills = require('./skills');
 const updater = require('./updater');
 const { UsageService } = require('./usage');
-const { startPresence } = require('./presence');
+const { startPresence, runState } = require('./presence');
 
 // Capability lists live in engine.js (single source of truth). caps() gives the SELECTED
 // engine's models/efforts/permissionModes so the dropdowns and validation re-skin per engine.
@@ -126,7 +126,12 @@ function syncPresence() {
     // disposes the loop) doesn't blank this window's usage row until the next poll lands.
     if (usage) presence.setUsage(usage.snapshot());
   }
-  presence.update({ visible: !!(view && view.visible), state: runningStep ? 'running' : 'idle', step: runningStep });
+  // runningStep only says WHICH step this window is on — it is set by every status that carries one
+  // and cleared only by 'done', so it stays set through a question, a hold and a finished-but-never-
+  // closed run. The runner's live flags say what that step is actually DOING (A-P10-09); read them
+  // per beat rather than shadowing them in a variable that another event has to remember to clear.
+  presence.update({ visible: !!(view && view.visible), step: runningStep,
+    state: runState({ step: runningStep, paused: runner?.paused, needsYou: runner?.needsYou }) });
 }
 
 // One OS notification per transition (needs-you/paused warn, done info). Dedupe on `key` so a
@@ -252,7 +257,9 @@ function ensureRunner() {
     notify(key, 'warn', `Plan Runner: ${s.step} — no output for ${s.seconds}s (still running).`);
     post({ kind: 'info', text: `⚠ No output from ${s.step} for ${s.seconds}s — the turn may be stalled.` });
   });
-  runner.on('paused', (d) => { post({ kind: 'paused', reason: d.reason }); postUsage(usage.snapshot()); notify('paused', 'warn', `Plan Runner paused — ${d.reason}`); });
+  // syncPresence here because 'paused' is the ONE transition with no status event behind it — the
+  // gate and the manual hold both emit only this. 'resumed' needs none: a status(running) follows it.
+  runner.on('paused', (d) => { post({ kind: 'paused', reason: d.reason }); postUsage(usage.snapshot()); syncPresence(); notify('paused', 'warn', `Plan Runner paused — ${d.reason}`); });
   runner.on('resumed', () => { post({ kind: 'resumed' }); postUsage(usage.snapshot()); lastNotify = null; });
   return runner;
 }

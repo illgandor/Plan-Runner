@@ -39,6 +39,16 @@ test('a peer renders as name · step · relative time', () => {
   assert.match(el.textContent, /Reno · P01-S07 · 2m ago/);
 });
 
+// A-P10-09: a peer stopped on a question used to read exactly like one mid-turn. Only the states
+// that are NOT a live run are printed — "running" is the absence of a word here.
+test('a peer that is waiting or paused says so; a running one does not', () => {
+  const el = fakeEl();
+  renderPresence(el, [{ user: 'Reno', step: 'P03-S10', state: 'waiting', ts: T0 - 120_000 }], T0);
+  assert.match(el.textContent, /Reno · P03-S10 · waiting · 2m ago/);
+  renderPresence(el, [{ user: 'Reno', step: 'P03-S10', state: 'paused', ts: T0 }], T0);
+  assert.match(el.textContent, /Reno · P03-S10 · paused · 0s ago/);
+});
+
 test('relative time buckets: seconds, minutes, hours', () => {
   const at = (ms) => presenceLabel([{ user: 'a', ts: T0 - ms }], T0).text;
   assert.match(at(30_000), /30s ago/);

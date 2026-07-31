@@ -19,7 +19,10 @@
     const t = now || Date.now();
     return {
       state: 'peer',
-      text: '● ' + peers.map((p) => [p.user || 'someone', p.step, p.ts ? ago(p.ts, t) : null]
+      // The state is shown only when it is NOT a live run: "Reno · P03-S10 · waiting · 2m ago".
+      // Printing "running" on every peer would be noise, and its absence is what running means here.
+      text: '● ' + peers.map((p) => [p.user || 'someone', p.step,
+        p.state && p.state !== 'running' ? p.state : null, p.ts ? ago(p.ts, t) : null]
         .filter(Boolean).join(' · ')).join(', '),
     };
   }

@@ -125,9 +125,12 @@ into the `.vsix`.
 - **Identity is your git remote**, normalized to `github.com/owner/repo`, so two clones on two
   machines agree which project they're on. No remote → `local/<folder-name>`; not a repo → no
   presence.
-- **It heartbeats only while the panel is visible** (60s during a live run, 300s idle), so
+- **It heartbeats only while the panel is visible** (60s during a live run, 300s otherwise), so
   last-seen always under-reports. An empty row means "no evidence here", never "nobody worked
   on it".
+- **"Running" means a turn is actually in flight.** A step that stops to ask you something reads
+  *waiting*, and one held on the usage gate reads *paused* — so a run that stalled overnight never
+  looks like one still working.
 - **Dashboard**: open the server's own URL in a browser for every project it has heard about,
   plus an **Account usage** row per person — session and week %, their pause limit, and how old
   the reading is. Useful when two people share one plan.

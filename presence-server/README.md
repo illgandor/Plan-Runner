@@ -62,6 +62,12 @@ last seen. It asks for the token once, keeps it in `localStorage`, and refreshes
 seconds. It defaults to the last 30 days with a **Show all** toggle, and puts projects more than
 one person reports at the top. "Forget token" clears it from the browser.
 
+A live person reads green **● running** only while a turn is actually in flight. **◐ waiting on an
+answer** (the step asked its owner something) and **❚❚ paused** (usage gate or a manual hold) are
+amber — the panel is open and the person is there, but nothing is being spent and nothing will move
+until someone acts. Before this existed all three read "running", so a run that stopped for the
+night looked exactly like one still working.
+
 Above the project list there is an **Account usage** section: one row per person with their Claude
 session and week percentages, their pause threshold, and when the reading was taken. That is the
 whole feature — two people on one plan being able to see who is about to trip the pause gate.
@@ -130,6 +136,13 @@ drop the `User=` line, copy the file to `~/.config/systemd/user/`, then
 `systemctl --user enable --now plan-runner-presence` and `sudo loginctl enable-linger $USER`
 so it starts at boot without you logging in. `%S` follows you: state lands in
 `~/.local/state/plan-runner/`.
+
+### Upgrading: server first, then the clients
+
+The `state` enum only ever grows, so an **older client always works against a newer server**. The
+other order does not: a client that reports `waiting` or `paused` to a server predating them gets a
+`400`, the beat is dropped, and that person silently disappears from the dashboard until the server
+catches up. Pull and restart the server before anyone installs the matching `.vsix`.
 
 ## Point Plan Runner at it
 
@@ -202,7 +215,9 @@ Runs the server on an ephemeral port and exercises the real HTTP surface.
 Frozen in `planning/reference/CONTRACTS.md` §Presence, §Dashboard and §Account usage (local to the
 maintainer's checkout). Every DATA route requires `Authorization: Bearer <token>`:
 
-- `POST /heartbeat` — `{project, user, step, state, ts}` → `204`. Malformed → `400`.
+- `POST /heartbeat` — `{project, user, step, state, ts}` → `204`. Malformed → `400`. `state` is
+  `running` (a turn is in flight) | `waiting` (the step is asking its owner something) | `paused`
+  (usage gate or a manual hold) | `idle` (panel open, no live run) — anything else is a `400`.
 - `GET /presence/:project` → `200 {peers:[{user, step, state, ts}]}`. Unknown project is `[]`,
   never a `404`. Peers unseen for 900s are dropped. Callers filter themselves out by `user`.
 - `POST /usage` — `{user, session, week, threshold, checkedAgeMs}` → `204`. Percentages are

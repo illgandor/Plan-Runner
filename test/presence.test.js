@@ -6,7 +6,8 @@ const assert = require('node:assert');
 const http = require('http');
 const fs = require('fs');
 const {
-  heartbeat, peers, reportUsage, displayName, startPresence, TIMEOUT_MS, RUNNING_MS, IDLE_MS,
+  heartbeat, peers, reportUsage, displayName, startPresence, runState,
+  TIMEOUT_MS, RUNNING_MS, IDLE_MS,
 } = require('../src/presence');
 
 // projectId + `git config user.name` both go through exec; stub it so tests never depend on git.
@@ -45,6 +46,35 @@ test('happy path: heartbeat posts the contract body and peers filters us out', a
 
     assert.deepStrictEqual(await peers(opts(url)), [{ user: 'Reno', step: 'P10-S05', state: 'running' }],
       'the caller filters ITSELF out by user');
+  } finally { server.close(); }
+});
+
+// A-P10-09. The bug: `running` was "this window has a step id", so a step waiting on an answer or
+// held on the usage gate beat `running` until the window closed — for days, on the dashboard.
+test('runState reads the runner flags, not merely the presence of a step', () => {
+  assert.strictEqual(runState({ step: null }), 'idle');
+  assert.strictEqual(runState({ step: 'P03-S10' }), 'running');
+  assert.strictEqual(runState({ step: 'P03-S10', needsYou: true }), 'waiting');
+  assert.strictEqual(runState({ step: 'P03-S10', paused: true }), 'paused');
+  assert.strictEqual(runState({ step: 'P03-S10', paused: true, needsYou: true }), 'paused',
+    'a hold outranks a question — a paused window is not going to answer it');
+  assert.strictEqual(runState({ step: null, paused: true, needsYou: true }), 'idle',
+    'no step is idle whatever the flags say');
+  assert.strictEqual(runState(), 'idle');
+});
+
+test('a heartbeat carries the new states, and an unknown one degrades to idle', async () => {
+  const bodies = [];
+  const { server, url } = await serve((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => { bodies.push(JSON.parse(body).state); rs.writeHead(204).end(); });
+  });
+  try {
+    for (const s of ['waiting', 'paused', 'running', 'idle']) await heartbeat({ state: s, step: 'P03-S10' }, opts(url));
+    // Never post a value the server would 400 — a rejected beat drops the person off the dashboard.
+    await heartbeat({ state: 'stalled?', step: 'P03-S10' }, opts(url));
+    assert.deepStrictEqual(bodies, ['waiting', 'paused', 'running', 'idle', 'idle']);
   } finally { server.close(); }
 });
 
@@ -133,6 +163,12 @@ test('the cadence follows D-043: 60s running, 300s idle-visible, no timer when h
   assert.strictEqual(calls.length, 4, 'an unchanged state does not re-arm or re-send');
   l.update({ visible: true, state: 'running', step: 'P10-S06' });
   assert.strictEqual(calls[4].step, 'P10-S06', 'a new step heartbeats immediately at the same cadence');
+
+  // A-P10-09: a step that stops to ask something is no longer a live run — it drops to the idle
+  // cadence and says so on the very next beat, not five minutes later.
+  l.update({ visible: true, state: 'waiting', step: 'P10-S06' });
+  assert.deepStrictEqual(live().map((t) => t.ms), [IDLE_MS], 'waiting spends nothing — idle cadence');
+  assert.deepStrictEqual([calls[6].state, calls[6].step], ['waiting', 'P10-S06']);
 
   l.update({ visible: false, state: 'running', step: 'P10-S06' });
   assert.deepStrictEqual(live(), [], 'hiding the panel stops every timer');
