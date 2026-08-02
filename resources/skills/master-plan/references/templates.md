@@ -319,7 +319,7 @@ machine path there cannot be corrected in a clone without breaking the hash for
 everyone else, so it is unfixable by construction. Say "the repo root" or "the
 folder holding PROGRESS.md", never the path you happen to be sitting in.
 
-## Shared-repo rules  {{INCLUDE ONLY IF several people drive this plan — STEP 1.4}}
+## Shared-repo rules  {{INCLUDE ONLY IF several people drive this plan — STEP 1.5}}
 PROGRESS.md is single-writer by design: session IDs are sequential and ▶ NEXT
 STEP is one cursor into a linear plan. There is no correct merge of "next is S07"
 and "next is S08", so the pointer cannot be reconciled after the fact — it has to

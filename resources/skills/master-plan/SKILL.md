@@ -54,7 +54,13 @@ State the detected mode before acting. All modes end with STEP 4.
    rulings on either/or choices found in the draft (resolve → Locked decision,
    park → Open decision that blocks its steps), and which actions are
    owner-only (accounts, payments, physical/device checks).
-4. **Ask: will one person drive this plan, or several?** (INIT and NEW-PLAN.)
+4. **Size the ask before decomposing it** (INIT). Estimate plans and steps. At
+   ≥ ~3 plans / ~45 steps — or when the draft leans on external systems nobody
+   has researched — state the estimate and offer a **Discovery plan** (PLAN-00:
+   research and roadmap first, PLAN-01 built from its output). Below that, say
+   nothing and convert. Rules and the exact offer:
+   `references/conversion-rules.md` §Discovery plan.
+5. **Ask: will one person drive this plan, or several?** (INIT and NEW-PLAN.)
    Several → record it as a Locked decision, and write the §Shared-repo rules
    block of CONVENTIONS.md (`references/templates.md` §6). It changes no step
    spec — it sets the close-out discipline that keeps two drivers from
@@ -75,6 +81,9 @@ Follow `references/conversion-rules.md` exactly. The short version:
   **before** writing the steps that depend on them.
 - Owner-only work: pre-split into `a` (agent) / `b` (owner-gated) steps or
   route to OWNER_TODO — never a DoD box an agent can't check.
+- Discovery plan (offered and accepted at STEP 1.4): number it PLAN-00, one research doc per
+  step under `planning/reference/research/`, last step writes `ROADMAP.md`. Same
+  grammar as any plan. See `conversion-rules.md` §Discovery plan.
 - Public-facing website: P01-S01 is a password **preview gate** (full site built
   behind it; public sees a holding page). Opening it to the public is its own
   owner-gated launch step at the end. Details: `conversion-rules.md` §Website
