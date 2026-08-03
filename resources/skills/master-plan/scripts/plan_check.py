@@ -74,6 +74,10 @@ NEXT_RE = re.compile(
     r"^NEXT(?:\[([^\]]+)\])?: "
     r"(P\d{2}-S\d{2}[ab]?\b|PLAN COMPLETE\b|none\b|WAIT P\d{2}-S\d{2}[ab]?\b)")
 SESSION_HEAD_RE = re.compile(r"^### (S\d{4}) ")
+# `## Session log` (the solo form) or `## Session log — <driver>` (one section per
+# driver). Group 1 = the driver, None when bare. The driver string IS the pointer's
+# lane, so per-lane coherence can find the section belonging to a given cursor.
+SESSION_LOG_RE = re.compile(r"^## Session log(?:\s+—\s+(\S+))?")
 PLAN_FILE_RE = re.compile(r"^PLAN-(\d{2})-[a-z0-9][a-z0-9-]*\.md$")
 SHARD_FILE_RE = re.compile(r"^SESSIONS-\d{4}-\d{4}\.md$")
 AMENDMENT_RE = re.compile(r"- A-P\d{2}-\d{2} ")
@@ -109,16 +113,29 @@ def sha256(path: Path):
     return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
-def section(lines, heading_prefix):
-    """Return (start, end) line indexes of the section whose ## heading starts
-    with heading_prefix, ending before the next ## heading. (-1,-1) if absent."""
-    start = -1
+def sections(lines, heading_prefix):
+    """(start, end) line indexes of EVERY section whose ## heading starts with
+    heading_prefix, each ending before the next ## heading. [] if absent.
+    Use this wherever a heading may legitimately repeat: section() below stops at
+    the first, which is how a second driver's session log went wholly unchecked."""
+    out, start = [], -1
     for i, ln in enumerate(lines):
-        if start == -1 and ln.startswith("## " + heading_prefix):
-            start = i
-        elif start != -1 and ln.startswith("## "):
-            return start, i
-    return (start, len(lines)) if start != -1 else (-1, -1)
+        if ln.startswith("## "):
+            if start != -1:
+                out.append((start, i))
+                start = -1
+            if ln.startswith("## " + heading_prefix):
+                start = i
+    if start != -1:
+        out.append((start, len(lines)))
+    return out
+
+
+def section(lines, heading_prefix):
+    """Return (start, end) line indexes of the FIRST section whose ## heading starts
+    with heading_prefix, ending before the next ## heading. (-1,-1) if absent."""
+    found = sections(lines, heading_prefix)
+    return found[0] if found else (-1, -1)
 
 
 def files_field(block):
@@ -204,7 +221,7 @@ def check_progress(root: Path):
     s, e = section(lines, "▶ NEXT STEP")
     # One cursor per lane. A solo file has exactly one, unlaned — every rule below
     # then reduces to the single-cursor behaviour it had before lanes existed.
-    next_ids, plan_path = [], None
+    next_ptrs, next_ids, plan_path = [], [], None
     if s == -1:
         add("FAIL", "▶ NEXT STEP section", "missing")
     else:
@@ -223,9 +240,10 @@ def check_progress(root: Path):
             # Two readers, two answers — so the file is wrong, not merely untidy.
             add("FAIL", "▶ NEXT STEP is laned or bare, never both",
                 f"a bare NEXT: alongside {sorted(l for l in lanes if l)}")
-        next_ids = [m.group(2) for m in ptrs
-                    if m.group(2) not in ("PLAN COMPLETE", "none")
-                    and not m.group(2).startswith("WAIT ")]
+        next_ptrs = [(m.group(1), m.group(2)) for m in ptrs
+                     if m.group(2) not in ("PLAN COMPLETE", "none")
+                     and not m.group(2).startswith("WAIT ")]
+        next_ids = [t for _, t in next_ptrs]
         if next_ids:
             for ln in block:
                 if ln.startswith("Plan: "):
@@ -244,44 +262,57 @@ def check_progress(root: Path):
                         add("FAIL", "NEXT step exists in its plan file",
                             f"[{next_id}] not found in {plan_path.name}")
 
-    # Session log
-    s, e = section(lines, "Session log")
+    # Session log — ONE bare section (the solo form) or one per driver, never a mix.
+    # Every section is validated independently under the same rules; validating only
+    # the first is how a second driver's log stayed silently unchecked.
+    logs = sections(lines, "Session log")
     session_ids = set()
-    if s == -1:
+    newest_next = {}  # driver (None = bare) -> its newest entry's Next: field
+    if not logs:
         add("FAIL", "Session log section", "missing")
-    else:
+    drivers = [SESSION_LOG_RE.match(lines[s]).group(1) for s, _ in logs]
+    if None in drivers and len(logs) > 1:
+        # Mirrors the laned-or-bare pointer FAIL above: two readers would disagree
+        # about which section is the log, so the file is wrong, not merely untidy.
+        add("FAIL", "Session log is per-driver or bare, never both",
+            f"a bare heading alongside {sorted(d for d in drivers if d)}")
+    for (s, e), driver in zip(logs, drivers):
+        who = f" — {driver}" if driver else ""
         entries = [i for i in range(s, e) if SESSION_HEAD_RE.match(lines[i])]
-        session_ids = {SESSION_HEAD_RE.match(lines[i]).group(1) for i in entries}
+        session_ids |= {SESSION_HEAD_RE.match(lines[i]).group(1) for i in entries}
         if len(entries) > SESSION_ENTRIES_MAX:
-            add("FAIL", f"Session log <= {SESSION_ENTRIES_MAX} hot entries",
+            add("FAIL", f"Session log{who} <= {SESSION_ENTRIES_MAX} hot entries",
                 f"{len(entries)} — rotate oldest to planning/archive/SESSIONS-*.md")
         bounds = entries + [e]
-        newest_next = None
         for n, i in enumerate(entries):
             entry = lines[i:bounds[n + 1]]
             eid = SESSION_HEAD_RE.match(lines[i]).group(1)
             if len(entry) > SESSION_ENTRY_MAX_LINES:
-                add("FAIL", f"entry {eid} <= {SESSION_ENTRY_MAX_LINES} lines",
+                add("FAIL", f"entry {eid}{who} <= {SESSION_ENTRY_MAX_LINES} lines",
                     f"{len(entry)} lines")
             body = "\n".join(entry)
             for f in SESSION_FIELDS:
                 fm = re.search(rf"^- {f}: (.*?)(?=^- \w+:|\Z)", body, re.M | re.S)
                 if not fm:
-                    add("FAIL", f"entry {eid} has field '{f}:'", "missing")
+                    add("FAIL", f"entry {eid}{who} has field '{f}:'", "missing")
                 else:
                     content = " ".join(fm.group(1).split())
                     if len(content) > SESSION_FIELD_MAX_CHARS:
-                        add("FAIL", f"entry {eid} field '{f}' <= "
+                        add("FAIL", f"entry {eid}{who} field '{f}' <= "
                             f"{SESSION_FIELD_MAX_CHARS} chars", f"{len(content)}")
                     if n == 0 and f == "Next":
-                        newest_next = content
-        # Per lane: the newest entry belongs to whichever lane just closed a step, so
-        # ITS cursor must match. With one lane (solo) this is the old rule exactly.
-        if next_ids and newest_next and not any(
-                i in STEP_ID_RE.findall(newest_next) for i in next_ids):
+                        newest_next[driver] = content
+    # Per lane: a cursor is evidenced by the newest entry of ITS OWN driver's section,
+    # not by the newest entry in the file — otherwise one driver's close-out vouches
+    # for the other's pointer. Solo (one bare pointer, one bare section) is the old
+    # rule exactly. A lane with no section of its own is un-evidenced, not wrong: that
+    # is the mid-migration state, and S05's ritual is what finishes it.
+    for lane, target in next_ptrs:
+        content = newest_next.get(lane)
+        if content and target not in STEP_ID_RE.findall(content):
             add("FAIL", "pointer coherence",
-                f"newest entry Next='{newest_next[:40]}' names no lane's "
-                f"▶ NEXT STEP ({', '.join(next_ids)})")
+                f"{lane or 'the'} lane's newest entry Next='{content[:40]}' does "
+                f"not name its ▶ NEXT STEP ({target})")
 
     # Board ↔ plan parity
     active_nn = None

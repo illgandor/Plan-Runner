@@ -363,6 +363,15 @@ filled) + new row <id>b ⬜ → NEXT: <id>b → one-line Amendment. Never end re
 - A shard holds exactly 25 entries; when full, start the next range
   (e.g. SESSIONS-0026-0050.md). If planning/archive/ has no shard yet, create
   SESSIONS-0001-0025.md with the PLANDOC:ARCHIVE header.
+- **Multi-driver:** the log splits into one `## Session log — <driver>` section per
+  driver, and each driver prepends into and rotates only their OWN section — which is
+  where two close-outs stop colliding on the same lines. Every section carries the
+  same budget (3 hot entries, 6 fields, the caps) and the checker applies it to each
+  independently. A bare `## Session log` is the solo form; mixing it with a
+  per-driver one is a FAIL, exactly as a bare `NEXT:` beside a laned one is.
+- **The shards stay shared.** Rotation is still into the one highest-numbered
+  SESSIONS-*.md, appended oldest-first by session ID across all drivers — there is
+  no per-driver archive, because nothing reads the archive by driver.
 
 ## Plan close (when the last board row flips ✅)
 The build session sets `NEXT: PLAN COMPLETE — run the master-plan skill` plus
