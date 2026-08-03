@@ -385,6 +385,15 @@ def check_plans(root: Path, hashes, progress_text):
                         add("FAIL", f"step {sid} no forward dep",
                             f"depends on {dep}, which sorts after it in the same plan")
 
+        # An ACTIVE plan must be LOCKED. Without this, a DRAFT plan can own the active
+        # board and be built step by step with no hash recorded and no immutability
+        # guarantee, and every hash rule below silently declines to fire. Recipes PLAN-02
+        # ran 16 steps this way (DRAFT -> COMPLETE, hashed only at close, 2026-07-31).
+        if f"PLAN-{nn}" in active_boards and status != "LOCKED":
+            add("FAIL", f"PLAN-{nn} active plan is LOCKED",
+                f"owns the active board with status '{status}' — lock it and run "
+                "--update-hashes, or its spec is not immutable and nothing will notice")
+
         if status == "LOCKED":
             # every LOCKED plan's per-step state must be visible somewhere:
             # the active board, a QUEUED/PARKED dashboard row, or a park file
