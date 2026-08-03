@@ -357,11 +357,25 @@ class Runner extends EventEmitter {
       session.defaultSend(channel, payload); // → panel (render), same as v2's sdkDriver
       if (gen !== this._gen || channel !== 'session:message') return;
       const t = payload.msg.type;
+      // A rate-limit event is a usage READING, not step progress: record it and stop there, so it
+      // can never re-arm the stall watchdog and mask a genuinely silent turn (P16-S05).
+      if (t === 'rate-limit') return this._recordUsageEvent(payload.msg);
       if (t === 'result') this._lastResult = payload.msg; // keep for the run ledger at step-done
       if (t === 'result' || t === 'error') return this._onTurnEnd(stepId, gen, t === 'error');
       if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
       if (this._turnLive) this._armStall(stepId, gen);     // live-turn activity → (re)arm the stall watchdog
     };
+  }
+
+  // P16-S05: the SDK's rate-limit event → the UsageService as a source-tagged reading, plus ONE
+  // ledger line per event so P16-S06 promotes on measured evidence instead of theory. Agreements
+  // are written too, not just divergences (`diverged` flags them) — "the event was reliable" is
+  // exactly as much evidence as "it wasn't", and it costs the same one line. Observe only: nothing
+  // here can move the gate, which still decides on the poll's numbers alone (D-072). The record
+  // carries no `startedAt`, so buildDigest skips it and the morning digest is unchanged.
+  _recordUsageEvent(msg) {
+    const rec = this.usageGate && this.usageGate.recordEvent && this.usageGate.recordEvent(msg);
+    if (rec) this.appendLedger(this.project.path, { kind: 'usage-event', ...rec, at: new Date(rec.at).toISOString() });
   }
 
   // Mid-turn stall watchdog (P09-S05, D-030): if a live turn goes stallMs with no session

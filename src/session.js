@@ -43,6 +43,15 @@ function mapMessage(m) {
     return [{ type: 'init', sessionId: m.session_id, model: m.model || null, slashCommands: m.slash_commands || [],
       mcpServers: (m.mcp_servers || []).map((s) => ({ name: s.name, status: s.status })) }];
   }
+  // The SDK's own rate-limit surface (SDKRateLimitEvent) — the SECOND usage source of
+  // CONTRACTS §Usage sources. Mapped thin like every other message; the Runner routes it to the
+  // UsageService and NOTHING renders it (chat.js's switch has no arm for it, deliberately). The
+  // payload is nested one level down in `rate_limit_info`; every field of it is optional.
+  if (m.type === 'rate_limit_event') {
+    const r = m.rate_limit_info || {};
+    return [{ type: 'rate-limit', status: r.status || null, utilization: r.utilization ?? null,
+      resetsAt: r.resetsAt ?? null, rateLimitType: r.rateLimitType || null }];
+  }
   if (m.type === 'stream_event') {
     const d = m.event && m.event.delta;
     if (d && d.type === 'text_delta' && d.text) return [{ type: 'text-delta', text: d.text }];

@@ -96,6 +96,36 @@ function resetText(at, now = Date.now()) {
   return hr < 48 ? `resets in ${hr}h` : `resets in ${Math.round(hr / 24)}d`;
 }
 
+// ---- The SDK rate-limit event, OBSERVE ONLY (P16-S05, CONTRACTS §Usage sources) -----------
+// A second Claude source: `rate_limit_event` off the message stream the Runner already consumes.
+// It is ingested, source-tagged and kept per meter — and read by NOBODY. breaches() still decides
+// on the poll's numbers alone (D-072), so this step cannot move the gate in either direction; that
+// is provable by test rather than by argument. Promoting it is P16-S06's job, on this step's
+// measured evidence (each ingest is written to the run ledger by the Runner).
+
+// `rateLimitType` → meter. Explicit, never a prefix rule: `seven_day_overage_included` and
+// `overage` are NOT per-model windows, so a `seven_day_*` prefix would guess them into the
+// per-model bar. Anything absent from this map is UNKNOWN — recorded and ignored (§Usage sources).
+const EVENT_METER = {
+  five_hour: 'session', seven_day: 'week', seven_day_opus: 'fable', seven_day_sonnet: 'fable',
+};
+const EVENT_DIVERGENCE_PCT = 10; // "material margin" — what makes an event worth a ledger line
+
+// The SDK types `utilization` as a bare number with no documented unit, and both 0–1 and 0–100 are
+// honest readings of the name. Normalised on the <=1 rule so it is comparable with the poll's
+// percentage, and acted on by nothing this step — the ledger record carries the RAW value so S06
+// confirms the unit against a real observation before anything trusts it.
+function eventPct(u) {
+  if (typeof u !== 'number' || !Number.isFinite(u) || u < 0) return null;
+  return Math.round(u <= 1 ? u * 100 : u);
+}
+// `resetsAt` is undocumented the same way; a value too small to be epoch ms is unix seconds.
+// The snapshot's clock is epoch ms (§Usage snapshot), so normalise to that.
+function eventResetAt(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return null;
+  return Math.round(v < 1e12 ? v * 1000 : v);
+}
+
 // Each `claude -p /usage` spawns a throwaway Claude Code session that gets saved as a
 // transcript — polling every minute floods ~/.claude/projects (and the VS Code session
 // list) with hundreds of them. The JSON output carries the session_id, so delete that one
@@ -231,6 +261,7 @@ class UsageService extends EventEmitter {
     this.weekResetsAt = null;
     this.fable = null;
     this.fableLabel = 'Fable'; // replaced by whatever /usage names on the first reading
+    this.events = {};       // P16-S05: last event reading PER METER, source-tagged. Read by nobody.
     this.max = null;
     this.checked = null;
     this.error = null;
@@ -289,6 +320,25 @@ class UsageService extends EventEmitter {
       weekThreshold: this.weekThreshold, fableThreshold: this.fableThreshold, pollSec: this.pollSec };
   }
 
+  // Ingest ONE mapped `rate-limit` message (session.js mapMessage) as a source-tagged reading, and
+  // return that record so the caller can put it somewhere a human will find it. Touches no meter
+  // the gate reads — `this.events` is a sidecar. An unknown `rateLimitType` still returns a record
+  // (so the ledger shows it arrived) but is recorded against NO meter, never guessed into one.
+  // Last-good is held per source (§Usage sources): a failed poll can't blank this, nor this a poll.
+  recordEvent(e, now = Date.now()) {
+    if (!e) return null;
+    const meter = EVENT_METER[e.rateLimitType] || null;
+    const rec = { source: 'event', at: now, meter, rateLimitType: e.rateLimitType || null,
+      status: e.status || null, utilization: e.utilization ?? null, pct: eventPct(e.utilization),
+      resetsAt: eventResetAt(e.resetsAt), pollPct: null, diverged: false };
+    if (!meter) return rec;
+    rec.pollPct = meter === 'session' ? this.session : meter === 'week' ? this.week : this.fable;
+    rec.diverged = rec.pct != null && rec.pollPct != null
+      && Math.abs(rec.pct - rec.pollPct) >= EVENT_DIVERGENCE_PCT;
+    this.events[meter] = rec;
+    return rec;
+  }
+
   setConfig({ threshold, weekThreshold, fableThreshold, pollSec }) {
     if (threshold != null) this.threshold = threshold;
     if (weekThreshold != null) this.weekThreshold = weekThreshold;
@@ -336,5 +386,5 @@ class UsageService extends EventEmitter {
 
 module.exports = {
   UsageService, defaultFetch, cleanupUsageSession, parseUsageText, parseResets, parseResetAt, resetText,
-  spawnArgs, pollEnv, usesModel, FETCH_TIMEOUT_MS,
+  spawnArgs, pollEnv, usesModel, eventPct, eventResetAt, FETCH_TIMEOUT_MS, EVENT_DIVERGENCE_PCT,
 };
