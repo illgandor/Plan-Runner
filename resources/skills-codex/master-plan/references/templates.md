@@ -388,6 +388,29 @@ zero plan boundaries.
 - **An owner-gated row does NOT halt it** — it becomes OWNER_TODO debt and the
   build continues past it.
 
+## Versioning (semver, bound to planning units)
+| Digit | Planning unit | Moves when |
+|---|---|---|
+| MAJOR | an owner ruling | a Decision breaks a frozen CONTRACTS.md section, or drops a shipped promise |
+| MINOR | a plan | a plan closes having changed what the product does for its user |
+| PATCH | a release | any other shipped build — a fix, a re-release, a docs-only republish |
+
+A step binds to no digit: most steps never ship, and one that does usually ships
+with four others.
+
+**The plan's closing step bumps** — the close-and-convert step where chaining is
+on, the plan's close-out step where it is not — and writes the changelog entry in
+the same commit. Never "whoever remembers". When several lanes close one plan the
+JOINING step owns the bump, not the last writer: the version file is a single file
+and two lanes bumping it is the same-file collision by construction, and the
+joining step is the only step guaranteed to run exactly once per plan.
+
+**No checker rule enforces any of this, deliberately.** plan_check.py has never
+opened a source file and must not start: most projects on this system are not
+packages and have no version to read, and a docs gate must never go red for a code
+reason — a version digit is arguable, so the rule would fail arguments, not builds.
+The release path already enforces the only mechanical rule that matters.
+
 ## Amendment procedure (spec is wrong or must change)
 Append to PROGRESS.md ## Amendments: `- A-P<NN>-<##> (<date>, affects <step ids>):
 <what/why in <=3 lines>. Plan unchanged.` Deep rationale goes in the commit body.
