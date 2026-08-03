@@ -147,6 +147,65 @@ incoming plan in relay shape — one lane holds S01, every other lane is written
 conversation this proposal opens; the owner re-lanes at a boundary they attend,
 or on request.
 
+## Discovery plan — PLAN-00 (research and planning as a plan)
+
+Some asks are too big to convert in one sitting: the owner describes a whole
+product, the honest answer is four or five plans, and the conversion turns into
+one enormous context window that guesses at half of it. A **Discovery plan** is
+the fix. It is an ordinary plan in every mechanical respect — LOCKED, hashed,
+boarded, 7 fields per step, ≤40 lines, a gate on every step — whose steps emit
+**documents instead of code**. Its last step writes the rough draft that the
+next `master-plan` NEW-PLAN run converts into PLAN-01.
+
+### When to offer it
+
+Size the ask FIRST, then decide. Do not ask every time — a project that is
+plainly one plan's worth converts straight to PLAN-01 with no question asked, or
+the prompt becomes noise the owner learns to decline reflexively.
+
+| Estimated scope of the initial ask | Action |
+|---|---|
+| ≤ ~2 plans / ~30 steps | Convert straight to PLAN-01. Say nothing. |
+| ≥ ~3 plans / ~45 steps, or the draft names unresearched external systems, or the owner supplied a whole-product vision rather than a feature | **State the estimate, then offer the choice.** |
+
+State the judgment, don't pose a bare question:
+
+> This sizes at roughly 5 plans / ~70 steps, and the auth and billing choices
+> aren't settled in the draft. Two options: a Discovery plan (PLAN-00) that
+> researches and drafts the whole roadmap first, or convert straight to PLAN-01
+> and plan the later phases as we reach them. Which?
+
+The owner declining is a normal answer — record it in Facts and convert.
+
+### Shape
+
+- **Numbered PLAN-00**, so PLAN-01 remains the first plan that ships something.
+  A Discovery plan is always the first plan in a project; a mid-project research
+  push is an ordinary plan whose steps happen to write docs, not a PLAN-00.
+- **Every step's Files field names the document it writes** — under
+  `planning/reference/research/`, one file per topic. Never one growing file:
+  that is CutClean's 1.7MB failure in a new costume.
+- **Verify is an observable-output check**, per §Step grammar rule 4: the named
+  sections exist and the open questions each carry a recommendation. The last DoD
+  box still names the project's docs gate.
+- **Research findings are not decisions.** A Discovery step records options,
+  evidence, and a recommendation. Anything the owner must rule on goes to §8 Open
+  decisions and OWNER_TODO — a research step never quietly rules on a design
+  choice by writing it down as settled.
+- **The last step writes `planning/reference/ROADMAP.md`**: the plan-by-plan
+  scope draft, each entry sized in steps, plus the decisions the owner still owes.
+  That file is the *input* to the next conversion — it is a draft, never a spec,
+  and it is not hash-locked. Stamp it
+  `> DRAFT SCOPE — input to master-plan NEW-PLAN. Not a spec; do not execute.`
+
+### Close-out
+
+PLAN-00 closes by the ordinary §Plan-close ritual. It does NOT convert its own
+successor unless the project opted into chaining. The owner re-runs `master-plan`
+in NEW-PLAN mode with `ROADMAP.md` as the rough draft, and PLAN-01 is written by
+a fresh window that reads research it did not have to perform — which is the
+whole point.
+
 ## Website preview gate (public-facing web projects)
 
 If the project serves a public-facing website, the FIRST buildable step (P01-S01,

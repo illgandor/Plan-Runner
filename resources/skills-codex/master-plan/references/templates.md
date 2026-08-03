@@ -338,7 +338,7 @@ machine path there cannot be corrected in a clone without breaking the hash for
 everyone else, so it is unfixable by construction. Say "the repo root" or "the
 folder holding PROGRESS.md", never the path you happen to be sitting in.
 
-## Shared-repo rules  {{INCLUDE ONLY IF several people drive this plan — STEP 1.4}}
+## Shared-repo rules  {{INCLUDE ONLY IF several people drive this plan — STEP 1.5}}
 Mode: relay — one driver at a time. Drivers: {{name}} · {{name}}.
 (The board's roster line says the same thing where the owner reads status; this says it
 where the rules live. Prose in both places — never a Lane column, never frontmatter.)

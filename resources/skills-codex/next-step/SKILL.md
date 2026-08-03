@@ -17,7 +17,7 @@ metadata:
   mirrored_from: next-step
   source_sha: 5ffc1792225c59eb8372a629971324e9b8b23d6951808df5a42de5557bdf0327
   twin_sha: c314da47dbe4220fd881d594b449f2df57af8b9b23285f816d07c6cbfc46db76
-  synced: 2026-07-24
+  synced: 2026-08-03
 ---
 
 # Next Step — execute one master-plan step

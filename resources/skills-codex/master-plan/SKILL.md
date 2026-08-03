@@ -16,9 +16,9 @@ description: >
 metadata:
   origin: claude
   mirrored_from: master-plan
-  source_sha: 7c932bd889bde65913ad9cbe0b0d45b9457211bb9837f5276080c7b06b8b2971
-  twin_sha: b38557850671e27b312676dd713566e74b802e8caf02fb2cefc9b43791c52b53
-  synced: 2026-07-24
+  source_sha: 61315aafc495a5e758cbbbeb6ccd0b7f2fc810805322cf2f65cf14a7bdfdd4bb
+  twin_sha: 68628de37aedb95515c766dce973d9dee2f262506784586f38d0c2bc519fdf94
+  synced: 2026-08-03
 ---
 
 # Master Plan — standardized planning system
@@ -60,7 +60,13 @@ State the detected mode before acting. All modes end with STEP 4.
    rulings on either/or choices found in the draft (resolve → Locked decision,
    park → Open decision that blocks its steps), and which actions are
    owner-only (accounts, payments, physical/device checks).
-4. **Ask: will one person drive this project, or more than one?** (INIT only —
+4. **Size the ask before decomposing it** (INIT). Estimate plans and steps. At
+   ≥ ~3 plans / ~45 steps — or when the draft leans on external systems nobody
+   has researched — state the estimate and offer a **Discovery plan** (PLAN-00:
+   research and roadmap first, PLAN-01 built from its output). Below that, say
+   nothing and convert. Rules and the exact offer:
+   `references/conversion-rules.md` §Discovery plan.
+5. **Ask: will one person drive this project, or more than one?** (INIT only —
    NEW-PLAN asks the one-line version below instead.) Verbatim:
 
    > Will one person drive this project, or more than one? **One** is the default
@@ -99,9 +105,9 @@ State the detected mode before acting. All modes end with STEP 4.
    names for one identity, and display names that differ are invisible to each
    other on the presence dashboard. Write the answer into §Shared-repo rules.
 
-   A **chained** conversion (item 5) re-asks none of these three: it carries the
+   A **chained** conversion (item 6) re-asks none of these three: it carries the
    recorded mode and drivers forward unchanged, or it does not chain.
-5. **Ask: should each plan hand off to the next one by itself?** (INIT, after the
+6. **Ask: should each plan hand off to the next one by itself?** (INIT, after the
    roadmap scope is known.) **Ask only when something is queued after this plan** —
    no ROADMAP, no plan named after this one, or a one-plan project all mean there is
    nothing to chain to, and a project with nothing following must not be prompted.
@@ -143,6 +149,9 @@ Follow `references/conversion-rules.md` exactly. The short version:
   ROADMAP scope draft in relay shape, and points `NEXT` at that plan's first step.
   See `conversion-rules.md` §Close-and-convert. The final plan on the roadmap has
   nothing to chain to and ends with the ordinary parking close.
+- Discovery plan (offered and accepted at STEP 1.4): number it PLAN-00, one research doc per
+  step under `planning/reference/research/`, last step writes `ROADMAP.md`. Same
+  grammar as any plan. See `conversion-rules.md` §Discovery plan.
 - Parallel project (the STEP 1 mode question answered parallel): after
   decomposition, derive the split with `plan_check.py --lanes PLAN-NN` and put it
   to the owner verbatim, both refusals included — they end in a serial plan, never
