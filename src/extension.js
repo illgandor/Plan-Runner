@@ -204,7 +204,10 @@ function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.s
   paused: !!(runner && runner.paused), error: s.error, checked: s.checked,
   // P16-S03: the clock is formatted HERE (usage.js resetText, pure + tested) so the panel only
   // paints a string it is given and decides nothing — '' when there is no clock to show.
-  sessionResets: resetText(s.sessionResetsAt), weekResets: resetText(s.weekResetsAt) }); }
+  sessionResets: resetText(s.sessionResetsAt), weekResets: resetText(s.weekResetsAt),
+  // P16-S06: the two Claude sources disagreeing, while they disagree — already a formed sentence,
+  // null when there is nothing to say.
+  divergence: s.divergence }); }
 
 // " · done/total" from PROGRESS.md, or "" when unreadable/not a master-plan project (P09-S15).
 function planFrac(dir) { const f = readPlanFraction(dir); return f ? ` · ${f.done}/${f.total}` : ''; }

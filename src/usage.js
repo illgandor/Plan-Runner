@@ -96,12 +96,10 @@ function resetText(at, now = Date.now()) {
   return hr < 48 ? `resets in ${hr}h` : `resets in ${Math.round(hr / 24)}d`;
 }
 
-// ---- The SDK rate-limit event, OBSERVE ONLY (P16-S05, CONTRACTS §Usage sources) -----------
+// ---- The SDK rate-limit event (P16-S05 ingest, P16-S06 promotion · CONTRACTS §Usage sources) ---
 // A second Claude source: `rate_limit_event` off the message stream the Runner already consumes.
-// It is ingested, source-tagged and kept per meter — and read by NOBODY. breaches() still decides
-// on the poll's numbers alone (D-072), so this step cannot move the gate in either direction; that
-// is provable by test rather than by argument. Promoting it is P16-S06's job, on this step's
-// measured evidence (each ingest is written to the run ledger by the Runner).
+// S05 ingested it and let it move nothing; S06 lets it win where it is fresher — see reading().
+// The poll path itself is still untouched byte for byte (D-072); this is added around it.
 
 // `rateLimitType` → meter. Explicit, never a prefix rule: `seven_day_overage_included` and
 // `overage` are NOT per-model windows, so a `seven_day_*` prefix would guess them into the
@@ -109,7 +107,8 @@ function resetText(at, now = Date.now()) {
 const EVENT_METER = {
   five_hour: 'session', seven_day: 'week', seven_day_opus: 'fable', seven_day_sonnet: 'fable',
 };
-const EVENT_DIVERGENCE_PCT = 10; // "material margin" — what makes an event worth a ledger line
+const EVENT_DIVERGENCE_PCT = 10; // "material margin" — worth a ledger line and a panel note
+const METER_LABEL = { session: 'Session', week: 'Week' }; // the per-model one is named by /usage
 
 // The SDK types `utilization` as a bare number with no documented unit, and both 0–1 and 0–100 are
 // honest readings of the name. Normalised on the <=1 rule so it is comparable with the poll's
@@ -261,7 +260,7 @@ class UsageService extends EventEmitter {
     this.weekResetsAt = null;
     this.fable = null;
     this.fableLabel = 'Fable'; // replaced by whatever /usage names on the first reading
-    this.events = {};       // P16-S05: last event reading PER METER, source-tagged. Read by nobody.
+    this.events = {};       // last event reading PER METER, source-tagged (last-good is per source)
     this.max = null;
     this.checked = null;
     this.error = null;
@@ -311,20 +310,66 @@ class UsageService extends EventEmitter {
     this._timer = setTimeout(() => this._tick(), Math.max(10, this.pollSec) * 1000);
   }
 
+  // Which source's number this meter actually shows (P16-S06, D-073). The NEWEST reading wins, in
+  // EITHER direction — and where the two are within one poll cadence of each other the EVENT wins,
+  // because it is derived from a request the server actually answered rather than a separate query
+  // that can serve a dead window. During a run usage only climbs and the poll lags up to pollSec,
+  // so the event is normally the HIGHER number: that is the case it exists for and it must not be
+  // suppressed — a "may only lower the meter" rule would discard exactly the reading that pauses
+  // on time, and the gate would keep pausing late.
+  //
+  // The whole rule is one comparison: the poll wins only once it is newer than the event by a full
+  // cadence. That also bounds the blast radius of a wrong event — the SDK leaves `utilization`'s
+  // unit undocumented — because an event's influence expires by itself within ~2 polls, with no
+  // code to undo it. Last-good is per source (§Usage sources): a failed poll never blanks a good
+  // event, and an event carrying no percentage (a bare `rejected`) never blanks the poll's number.
+  reading(name) {
+    const pct = name === 'session' ? this.session : name === 'week' ? this.week : this.fable;
+    // No per-model reset clock exists in the `/usage` text — only an event can ever supply one.
+    const resetsAt = name === 'session' ? this.sessionResetsAt : name === 'week' ? this.weekResetsAt : null;
+    const poll = { pct, resetsAt, source: 'poll', status: null };
+    const ev = this.events[name];
+    if (!ev || (ev.pct == null && ev.status !== 'rejected')) return poll;
+    if (pct != null && this.checked != null
+      && this.checked - ev.at > Math.max(10, this.pollSec) * 1000) return poll;
+    return { pct: ev.pct ?? pct, resetsAt: ev.resetsAt ?? resetsAt, source: 'event', status: ev.status };
+  }
+
+  // Material disagreement between the two Claude sources, as the panel says it. Computed live, so
+  // it goes away the moment they agree again or the poll overtakes the event — this is the
+  // diagnostic that would have caught S0124 in minutes instead of 3.5 hours.
+  divergence() {
+    const out = [];
+    for (const [meter, pollPct] of [['session', this.session], ['week', this.week], ['fable', this.fable]]) {
+      const ev = this.events[meter];
+      if (!ev || ev.pct == null || pollPct == null || this.reading(meter).source !== 'event') continue;
+      if (Math.abs(ev.pct - pollPct) >= EVENT_DIVERGENCE_PCT)
+        out.push(`${METER_LABEL[meter] || this.fableLabel} ${ev.pct}% live vs ${pollPct}% polled`);
+    }
+    return out.length ? out.join(' · ') : null;
+  }
+
   // `max` stays session/week only (§Usage snapshot): the model week is gated per-run, so folding
   // it in here would make one account-wide number mean different things in different windows.
+  // Every number here is the EFFECTIVE reading, so the panel, the gate and the dashboard can never
+  // disagree about what the meter says — there is one precedence rule and they all read it.
   snapshot() {
-    return { session: this.session, week: this.week, fable: this.fable, fableLabel: this.fableLabel,
-      sessionResetsAt: this.sessionResetsAt, weekResetsAt: this.weekResetsAt, // P16-S02: carried, read by nobody yet
-      max: this.max, checked: this.checked, error: this.error, threshold: this.threshold,
+    const s = this.reading('session'), w = this.reading('week'), f = this.reading('fable');
+    const vals = [s.pct, w.pct].filter((v) => v != null);
+    return { session: s.pct, week: w.pct, fable: f.pct, fableLabel: this.fableLabel,
+      sessionResetsAt: s.resetsAt, weekResetsAt: w.resetsAt,
+      source: [s, w, f].some((r) => r.source === 'event') ? 'event' : (this.checked ? 'poll' : null),
+      divergence: this.divergence(),
+      max: vals.length ? Math.max(...vals) : null, checked: this.checked, error: this.error,
+      threshold: this.threshold,
       weekThreshold: this.weekThreshold, fableThreshold: this.fableThreshold, pollSec: this.pollSec };
   }
 
   // Ingest ONE mapped `rate-limit` message (session.js mapMessage) as a source-tagged reading, and
-  // return that record so the caller can put it somewhere a human will find it. Touches no meter
-  // the gate reads — `this.events` is a sidecar. An unknown `rateLimitType` still returns a record
-  // (so the ledger shows it arrived) but is recorded against NO meter, never guessed into one.
-  // Last-good is held per source (§Usage sources): a failed poll can't blank this, nor this a poll.
+  // return that record so the caller can put it somewhere a human will find it. An unknown
+  // `rateLimitType` still returns a record (so the ledger shows it arrived) but is recorded against
+  // NO meter, never guessed into one — and then nothing is emitted, because nothing changed.
+  // Whether the recorded reading actually moves a meter is reading()'s call, not this one's.
   recordEvent(e, now = Date.now()) {
     if (!e) return null;
     const meter = EVENT_METER[e.rateLimitType] || null;
@@ -336,6 +381,7 @@ class UsageService extends EventEmitter {
     rec.diverged = rec.pct != null && rec.pollPct != null
       && Math.abs(rec.pct - rec.pollPct) >= EVENT_DIVERGENCE_PCT;
     this.events[meter] = rec;
+    this.emit('update', this.snapshot()); // the panel repaints on the event, not one poll later
     return rec;
   }
 
@@ -365,23 +411,32 @@ class UsageService extends EventEmitter {
   // open with the right answer sitting in the same line. The margin is one poll cadence so a
   // boundary tick cannot oscillate. A null reset time changes nothing, and dropping a row can
   // only ever RELEASE a hold — no new pause is reachable from here.
+  //
+  // P16-S06: each row is the EFFECTIVE reading (reading(), D-073), and a `rejected` status is a
+  // server verdict that outranks any percentage — `allowed_warning` alone still does not pause.
+  // A fresher source CAN therefore pause slightly earlier than the poll would have; that is the
+  // gate acting on better information. The guarantee is not "no new hold", it is that every hold
+  // can end — which stays the reset clock's job, below.
   breaches(model) {
     const cutoff = Date.now() - Math.max(10, this.pollSec) * 1000;
     const expired = (at) => at != null && at < cutoff;
     const rows = [
-      { name: 'session', pct: this.session, limit: this.threshold, resetsAt: this.sessionResetsAt },
-      { name: 'weekly', pct: this.week, limit: this.weekThreshold, resetsAt: this.weekResetsAt },
+      { name: 'session', limit: this.threshold, ...this.reading('session') },
+      { name: 'weekly', limit: this.weekThreshold, ...this.reading('week') },
     ];
     if (usesModel(model, this.fableLabel))
-      // No per-model reset clock exists in the `/usage` text, so this meter is never released early.
-      rows.push({ name: `weekly ${this.fableLabel}`, pct: this.fable, limit: this.fableThreshold, resetsAt: null });
-    return rows.filter((r) => r.pct != null && r.limit != null && r.pct >= r.limit && !expired(r.resetsAt));
+      rows.push({ name: `weekly ${this.fableLabel}`, limit: this.fableThreshold, ...this.reading('fable') });
+    return rows.filter((r) => !expired(r.resetsAt)
+      && (r.status === 'rejected' || (r.pct != null && r.limit != null && r.pct >= r.limit)));
   }
 
   // The gate StepRunner consults before starting a step and on every poll. `model` is the run's
   // effective model — omit it and the model-scoped limit simply doesn't apply.
   isOverThreshold(model) { return this.breaches(model).length > 0; }
-  describe(model) { return this.breaches(model).map((r) => `${r.name} usage ${r.pct}% ≥ ${r.limit}%`).join(' · '); }
+  describe(model) {
+    return this.breaches(model).map((r) => (r.status === 'rejected'
+      ? `${r.name} usage rejected by the server` : `${r.name} usage ${r.pct}% ≥ ${r.limit}%`)).join(' · ');
+  }
 }
 
 module.exports = {

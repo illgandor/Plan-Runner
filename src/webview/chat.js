@@ -23,6 +23,7 @@
       <div class="gauge" id="frow"><span class="glabel" id="flabel">Fable</span><progress id="fbar" max="100" value="0"></progress><span class="gpct" id="fpct">—</span></div>
       <div class="gauge tokrow" id="tokrow" style="display:none" title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
       <div class="uerr" id="uerr" hidden></div>
+      <div class="uerr" id="udiv" hidden></div>
     </div>
     <div class="status" id="status" aria-live="polite">Idle</div>
     <div id="log"></div>
@@ -759,6 +760,9 @@
     // supplied, so Codex gets it for free at S08 with no second renderer.
     setReset($('srst'), d.sessionResets);
     setReset($('wrst'), d.weekResets);
+    // The two Claude sources disagreeing, only while they do (P16-S06). The host sends a formed
+    // sentence or null, so this decides nothing — same contract as the reset clock above.
+    setReset($('udiv'), d.divergence && !codex ? '↯ ' + d.divergence : '');
     paintUsageError(d, codex);
   }
   // Hidden when there is nothing to say — an empty span would still take the row's flex gap, and
