@@ -275,9 +275,15 @@ class Runner extends EventEmitter {
     // so the NEXT pointer below would be stale too — you'd redo a finished step or collide with it.
     // Checked BEFORE readPointer for exactly that reason. No upstream / no remote / offline never
     // blocks (gitState reports behind:false), so solo projects pay nothing.
-    if (this.gitCheck(this.project.path).behind) {
-      return this._finish('idle', 'Behind the remote — someone else pushed work this clone does not '
-        + 'have. Run `git pull --ff-only`, then Start again.');
+    // Behind AND unpushed = diverged: `--ff-only` REFUSES on a diverged branch, so advising it sends
+    // the owner to a command that cannot work. What blocks is unchanged (P14-S05) — only the advice.
+    const fresh = this.gitCheck(this.project.path);
+    if (fresh.behind) {
+      return this._finish('idle', 'Behind the remote — someone else pushed work this clone does not have. '
+        + (fresh.pushed
+          ? 'Run `git pull --ff-only`, then Start again.'
+          : 'This branch has also diverged (it has local commits that are not pushed), so '
+            + '`git pull --ff-only` cannot succeed — rebase or merge them yourself, then Start again.'));
     }
     const next = readPointer(this.project.path);
     if (!next) return this._finish('error', 'No NEXT pointer / PROGRESS.md — not a master-plan project');

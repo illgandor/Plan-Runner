@@ -45,6 +45,28 @@ test('behind the remote: refuses to start, names the fix, runs no step', () => {
   } finally { f.restore(); }
 });
 
+// P14-S05: behind AND unpushed is a DIVERGED branch — `git pull --ff-only` refuses on one, so the
+// advice must name the divergence and the choice (rebase or merge) instead of handing over a
+// command that cannot succeed. What the guard BLOCKS is unchanged; only what it says.
+test('behind and diverged: names the divergence, never advises --ff-only, runs no step', () => {
+  const project = tempProject('P01-S01');
+  const f = fakeSession();
+  try {
+    const r = new Runner(project);
+    r.gitCheck = () => ({ clean: true, pushed: false, behind: true });
+    const seen = [];
+    r.on('status', (d) => seen.push(d));
+    r.start();
+    assert.strictEqual(f.calls.start, 0, 'a diverged checkout must still be blocked');
+    const idle = seen.find((d) => d.state === 'idle');
+    assert.ok(idle, `expected an idle finish, got ${JSON.stringify(seen)}`);
+    assert.match(idle.detail, /diverged/, 'must name the divergence');
+    assert.match(idle.detail, /rebase or merge/, 'must name what the owner has to decide');
+    // It may NAME --ff-only to explain why it fails; it may not tell the owner to RUN it.
+    assert.doesNotMatch(idle.detail, /Run `git pull/, 'must not advise a command that cannot succeed');
+  } finally { f.restore(); }
+});
+
 test('up to date: the step runs normally', () => {
   const project = tempProject('P01-S01');
   const f = fakeSession();
