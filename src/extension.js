@@ -122,6 +122,11 @@ function syncPresence() {
       settings: { url: c.get('presenceUrl', ''), token: c.get('presenceToken', ''), name: c.get('presenceName', '') },
       cwd: p.path,
       onPeers: (peers) => post({ kind: 'presence', peers }), // S06 renders it; the token never goes to the webview
+      // P20-S03: the active handoff surface. It TELLS a human and stops there — it never starts the
+      // step (doc 05 §4.3): INV-8 asks that unattended runs not block, not that idle windows begin
+      // working on their own. Keyed on the step id, so notify()'s existing dedupe covers a repeat.
+      onHandoff: (step) => notify('handoff:' + step, 'info',
+        `Plan Runner: ${step} is free — the claim that blocked you has been released.`),
     });
     // P12-S05: seed a fresh loop from whatever the meter already knows, so a settings edit (which
     // disposes the loop) doesn't blank this window's usage row until the next poll lands.
@@ -287,7 +292,9 @@ function ensureRunner() {
   runner.on('status', (s) => {
     post({ kind: 'status', ...s });
     if (s.step) runningStep = s.step;                                    // running/finalizing/needs-you carry the step
-    if (s.state === 'running' || s.state === 'finalizing') lastNotify = null; // active again → re-arm notifications
+    // Active again → re-arm notifications, and forget any refusal: a window that is working needs
+    // no invitation to work (P20-S03).
+    if (s.state === 'running' || s.state === 'finalizing') { lastNotify = null; if (presence) presence.setRefused(null); }
     else if (s.state === 'needs-you') notify('needs-you:' + s.step, 'warn', `Plan Runner: ${s.detail || s.step + ' needs you'}`);
     updateStatusBar();
     syncPresence(); // new step / new state → heartbeat it (fire-and-forget, never awaited)
@@ -298,6 +305,10 @@ function ensureRunner() {
     post({ kind: 'done', ...d });
     runningStep = null; updateStatusBar();
     syncPresence(); // run over → drop back to the idle cadence
+    // P20-S03: a run that ended on the OTHER driver's claim is the only thing that arms the handoff
+    // signal. Read off the runner's own field on an event it already emits — never by a call into
+    // the runner, which gains no presence reference (INV-4). syncPresence above created the loop.
+    if (presence && runner._claim && runner._claim.verdict === 'held') presence.setRefused(runner._claim.step);
     postDigest(d.startedAtMs); // P09-S16: one "what did it do while I slept?" block at run end
     if (d.state === 'done') notify('done', 'info', `Plan Runner: ${d.detail || 'run complete'}`);
     else if (d.state === 'error') notify('error', 'warn', `Plan Runner: ${d.detail || 'run errored'}`);

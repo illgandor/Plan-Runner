@@ -6,6 +6,8 @@
 'use strict';
 const { execFileSync } = require('child_process');
 const { projectId, presenceConfig } = require('./presence-id');
+const { claimRef, CLAIM_TIMEOUT_MS } = require('./claims');
+const { readPointer } = require('./progress');
 
 const TIMEOUT_MS = 5000; // §Presence: hard per-request timeout, <=5s
 
@@ -129,6 +131,40 @@ async function reportUsage(snap, opts = {}) {
   } catch { return null; }
 }
 
+// ---- The handoff signal (P20-S03) ----
+// A driver refused a step (runner.js claimRefusal) has no way to learn it opened except by trying
+// again. This is the answer, and it is deliberately the cheapest one: no push channel (D-088), no
+// new timer, no new route and nothing asked of the server — giving the server a plan graph would
+// make it authoritative about work (INV-1, INV-4/D-064). Every input is already on this machine.
+
+// Is `step` unclaimed on the remote? true = free · false = held · null = COULD NOT TELL.
+// Three-valued on purpose: `git ls-remote` failing (offline, auth, no origin) must never read as
+// "free", or one dropped packet announces a handoff that never happened. ~0.25s, no fetch, no
+// checkout (research 03 §2.5) — and it is only ever reached while a refusal is remembered.
+function claimFree(cwd, step, { exec = execFileSync, timeout = CLAIM_TIMEOUT_MS } = {}) {
+  try {
+    return !String(exec('git', ['ls-remote', 'origin', claimRef(step)], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout, windowsHide: true,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, // never block an idle window on a password
+    }) || '').trim();
+  } catch { return null; }
+}
+
+// What the tick should announce, or null for silence. Every guard is a refusal to speak:
+//  - no lane → the check never runs at all; claims are inert without one (INV-5, D-084), so there
+//    is nobody to be blocked by and not one extra git call is paid by a solo project.
+//  - nothing remembered → nobody was refused, so nobody is waiting to be told.
+//  - the pointer is RE-READ every time: it may have moved, because the driver who held the step
+//    finished it — so the step that is open now is the one to name, not the one refused then.
+//  - `none`/`WAIT`/`PLAN COMPLETE` are not runnable steps, and a claim read that failed is not free.
+// Pure given its two readers, so the whole rule is a unit test rather than a claim in extension.js.
+function handoffOpen({ cwd, lane, refused, pointer = readPointer, free = claimFree, exec } = {}) {
+  if (!lane || !refused) return null;
+  const next = pointer(cwd, lane);
+  if (!next || /^(none|WAIT\b|PLAN COMPLETE)/i.test(next)) return null;
+  return free(cwd, next, { exec }) === true ? next : null;
+}
+
 // ---- The cadence loop (P10-S05, D-043) ----
 // One interval; each tick fires a heartbeat AND a peers poll, both fire-and-forget. Nothing here is
 // ever awaited by a runner path, so a dead or slow server can never block, delay or fail a step
@@ -140,21 +176,35 @@ function startPresence(opts = {}) {
   const setTimer = opts.setTimer || setInterval;
   const clearTimer = opts.clearTimer || clearInterval;
   const onPeers = opts.onPeers || (() => {});
+  const onHandoff = opts.onHandoff || (() => {});
   const client = opts.client || { heartbeat, peers, reportUsage };
   let timer = null, last = null, ok = null, cur = { state: 'idle', step: null, lane: null, claim: null };
   let usage = null;   // the latest §Usage snapshot; see setUsage below
+  let refused = null; // the step this window was turned away from, or null; see setRefused below
+  let told = null;    // the step already announced, so a repeat tick states a transition, not a fact
   let opt = opts; // opts + the resolved identity, so a tick spawns no git at all
 
   const tick = () => {
     Promise.resolve(client.heartbeat(cur, opt)).catch(() => {});
     Promise.resolve(client.peers(opt)).then(onPeers, () => {});
     if (usage) Promise.resolve(client.reportUsage(usage, opt)).catch(() => {});
+    // P20-S03: the handoff check rides THIS tick — no new timer, and no work at all until somebody
+    // has actually been refused. The tick only exists while the panel is visible, so a closed
+    // editor costs nothing; the dashboard badge (S04) is the surface for that case.
+    if (refused) {
+      const open = handoffOpen({ cwd: opts.cwd, lane: cur.lane, refused, ...(opts.handoff || {}) });
+      if (open && open !== told) { told = open; onHandoff(open); }
+    }
   };
   // D-053: usage rides this tick and is deliberately NOT part of the cadence key below. It changes
   // every poll, so keying on it would clear and re-arm the interval every minute and the cadence
   // would thrash — the meter would be either permanently stale or on a timer that never settles.
   // Assigning here lets the NEXT already-scheduled tick carry the fresh value, which is the point.
   function setUsage(s) { usage = s || null; }
+  // P20-S03: the memory of "I was refused <step>" lives HERE and in extension.js beside the
+  // notification — never in the runner, which keeps claimRefusal a pure string and stays
+  // presence-free (INV-4). Arming it re-opens the mouth; a run starting (null) closes it again.
+  function setRefused(step) { refused = step || null; if (refused) told = null; }
   function stop() { if (timer) clearTimer(timer); timer = null; last = null; }
   // Hidden panel, no config or no git remote → no timer and no request at all (D-039). ready() is
   // two git execs, so it is resolved once per loop; a settings edit disposes the loop instead.
@@ -184,10 +234,10 @@ function startPresence(opts = {}) {
     timer = setTimer(tick, ms);
     tick(); // report the transition now, not one interval late
   }
-  return { update, setUsage, stop };
+  return { update, setUsage, setRefused, stop };
 }
 
 module.exports = {
   heartbeat, peers, reportUsage, displayName, startPresence, runState, claimStep,
-  TIMEOUT_MS, RUNNING_MS, IDLE_MS, STATES,
+  claimFree, handoffOpen, TIMEOUT_MS, RUNNING_MS, IDLE_MS, STATES,
 };

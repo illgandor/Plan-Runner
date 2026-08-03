@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const {
   heartbeat, peers, reportUsage, displayName, startPresence, runState, claimStep,
-  TIMEOUT_MS, RUNNING_MS, IDLE_MS,
+  claimFree, handoffOpen, TIMEOUT_MS, RUNNING_MS, IDLE_MS,
 } = require('../src/presence');
 const { readPointer, isLaned } = require('../src/progress');
 
@@ -337,6 +337,64 @@ test('a claim change re-keys the cadence; an unchanged one does not', () => {
   beat(null);
   assert.strictEqual(calls.length, 4, 'releasing it is a real transition — reported now, not 5m late');
   assert.strictEqual(calls[2].claim, null);
+});
+
+// ---- The handoff signal (P20-S03) ----
+// Everything below is about what the signal REFUSES to say. The failure that matters is not a
+// missed notification, it is a false one: "your step is free" is acted on by a human.
+test('handoffOpen speaks only about a runnable step that is provably free', () => {
+  const open = (o = {}) => handoffOpen({
+    cwd: '.', lane: 'tyler', refused: 'P20-S03', pointer: () => 'P20-S04', free: () => true, ...o,
+  });
+  assert.strictEqual(open(), 'P20-S04',
+    'the pointer moved on — the step free NOW is the one to name, not the one refused then');
+  assert.strictEqual(open({ refused: null }), null, 'nobody was refused, so nobody is waiting');
+  assert.strictEqual(open({ lane: '' }), null, 'no lane, no claims, no check (INV-5, D-084)');
+  assert.strictEqual(open({ free: () => null }), null, 'a claim read that FAILED is not a free step');
+  assert.strictEqual(open({ free: () => false }), null, 'still held');
+  for (const p of [null, 'none', 'WAIT P20-S04 (lane reno)', 'PLAN COMPLETE — run the master-plan skill'])
+    assert.strictEqual(open({ pointer: () => p }), null, `${p} is not a runnable step`);
+});
+
+test('claimFree is three-valued: an unreadable remote is not a free step', () => {
+  assert.strictEqual(claimFree('.', 'P20-S04', { exec: () => '' }), true);
+  assert.strictEqual(claimFree('.', 'P20-S04', { exec: () => 'sha\trefs/claims/P20-S04\n' }), false);
+  assert.strictEqual(claimFree('.', 'P20-S04', { exec: () => { throw new Error('offline'); } }), null);
+});
+
+test('the idle tick tells a refused driver ONCE, and says nothing before the refusal', () => {
+  const seen = [], reads = [];
+  const { l, timers } = loop({
+    onHandoff: (s) => seen.push(s),
+    handoff: { pointer: (cwd, lane) => { reads.push(lane); return 'P20-S04'; }, free: () => true },
+  });
+  const fire = () => timers.filter((t) => t.live).forEach((t) => t.fn());
+  l.update({ visible: true, state: 'idle', step: null, lane: 'tyler' });
+  fire();
+  assert.deepStrictEqual([seen, reads], [[], []], 'nobody refused → the pointer is not even read');
+  l.setRefused('P20-S04');
+  fire();
+  assert.deepStrictEqual(seen, ['P20-S04'], 'the step opened — say so, on the tick that already runs');
+  fire();
+  assert.deepStrictEqual(seen, ['P20-S04'], 'a second tick on the same transition says nothing');
+});
+
+test('with no lane configured the handoff check never runs at all (INV-5, D-084)', () => {
+  const boom = () => { throw new Error('an unlaned project must pay nothing for claims'); };
+  const { l, timers } = loop({ onHandoff: boom, handoff: { pointer: boom, free: boom } });
+  l.update({ visible: true, state: 'idle', step: null }); // no lane
+  l.setRefused('P20-S04');
+  assert.doesNotThrow(() => timers.filter((t) => t.live).forEach((t) => t.fn()));
+});
+
+// doc 05 §4.3: being told is the feature. Starting the step is not — an idle window may not begin
+// working on its own, so the notification path can reach the runner through nothing at all.
+test('nothing auto-starts: presence.js never reaches the runner, and onHandoff only notifies', () => {
+  const src = fs.readFileSync(require.resolve('../src/presence.js'), 'utf8');
+  assert.ok(!/require\(['"][^'"]*runner/i.test(src), 'presence may not import the runner');
+  assert.ok(!/\brunner\w*\s*\.\s*\w+\s*\(/i.test(src), 'nor call one through any other handle');
+  assert.match(fs.readFileSync(require.resolve('../src/extension.js'), 'utf8'),
+    /onHandoff: \(step\) => notify\(/, 'the host wires the signal to a notification and nothing else');
 });
 
 // doc 05 §3.2, enforcement point 2. `null` survives JSON.stringify intact, which is the only reason
