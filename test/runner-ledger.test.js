@@ -47,9 +47,13 @@ test('completed step appends exactly one well-formed ledger record', (t) => {
     r.start();
     t.mock.timers.tick(0);
 
-    assert.equal(rows.length, 1, 'exactly one record for the one completed step');
-    assert.equal(rows[0].cwd, p.path);
-    const rec = rows[0].rec;
+    // P22-S02 added a `step-attempt` record at every step START (A-P22-01), so the completed-step
+    // record is no longer the only line — but it is still exactly one per completed step.
+    assert.deepEqual(rows.map((r) => r.rec.kind), ['step-attempt', undefined], 'attempt, then the done record');
+    const dones = rows.filter((r) => r.rec.outcome === 'done');
+    assert.equal(dones.length, 1, 'exactly one record for the one completed step');
+    assert.equal(dones[0].cwd, p.path);
+    const rec = dones[0].rec;
     assert.deepEqual(Object.keys(rec).sort(),
       ['costUsd', 'effort', 'endedAt', 'engine', 'model', 'numTurns', 'outcome', 'startedAt', 'stepId', 'tokens'],
       'record has exactly the contract fields');

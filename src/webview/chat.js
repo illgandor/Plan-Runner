@@ -456,7 +456,10 @@
         reflect(); break;
       case 'enabled': enabled = d.value; reflect(); break;
       case 'status':
-        setStatus(d); running = d.state === 'running' || d.state === 'needs-you' || d.state === 'finalizing'; reflect();
+        // `diagnosing` is a LIVE state (P22-S02): the step keeps running, it just changed method —
+        // so it belongs in this set, or Stop/Pause would vanish the moment a step got stuck.
+        setStatus(d); running = d.state === 'running' || d.state === 'needs-you'
+          || d.state === 'finalizing' || d.state === 'diagnosing'; reflect();
         if (d.state === 'needs-you') { const el = ensureAssistant(); } // keep group open for the answer
         break;
       case 'step-started': stepChip(hk() ? `▶ BREACHING ${d.step || 'NODE'}` : '▶ ' + (d.step || 'step')); cur = null; break;
@@ -842,7 +845,10 @@
     const s = $('status');
     const phrase = hk() && HACKER_STATE[d.state];   // detail rides along, so the step is never lost
     s.textContent = phrase ? `${phrase} — ${d.detail || d.state}` : (d.detail || d.state);
-    s.className = 'status' + (d.state === 'needs-you' ? ' needs-you' : '');
+    // Three looks, not two: working · stuck-and-switching-method · waiting on you. A `diagnosing`
+    // step is still running, so it must not read as a plain `running` one (P22-S02).
+    s.className = 'status' + (d.state === 'needs-you' ? ' needs-you'
+      : d.state === 'diagnosing' ? ' diagnosing' : '');
     // On ENTERING needs-you, pull attention to the banner and put the cursor in the
     // composer. Guard on the transition so a repeated needs-you doesn't steal focus mid-answer.
     if (d.state === 'needs-you' && lastState !== 'needs-you') { s.scrollIntoView(); $('input').focus(); }

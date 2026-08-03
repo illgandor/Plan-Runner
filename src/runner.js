@@ -59,15 +59,20 @@ const FETCH_TIMEOUT_MS = 20000; // a freshness fetch may not stall the loop on a
 // <cwd>/.plan-runner/runs.jsonl so "what did it do while I slept?" survives session teardown.
 // Best-effort — a write failure is swallowed and never blocks or delays the loop. Exported
 // for the runner method + tests. The dir self-ignores (see below), so it never dirties the tree.
+// Self-ignoring scratch dir: keeps everything the runner writes out of `git status` without
+// editing the project's own .gitignore. A dirty tree at step start now stops next-step's
+// crash-recovery guard, so scratch files must never be what dirties it. `*` ignores everything
+// BELOW the dir too, so subdirs (diagnostics/, P22-S02) inherit it and get no second rule.
+function planRunnerDir(cwd) {
+  const dir = path.join(cwd, '.plan-runner');
+  fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(path.join(dir, '.gitignore'))) fs.writeFileSync(path.join(dir, '.gitignore'), '*\n');
+  return dir;
+}
+
 function appendLedger(cwd, record) {
   try {
-    const dir = path.join(cwd, '.plan-runner');
-    fs.mkdirSync(dir, { recursive: true });
-    // Self-ignoring dir: keeps the ledger out of `git status` without editing the
-    // project's own .gitignore. A dirty tree at step start now stops next-step's
-    // crash-recovery guard, so scratch logs must never be what dirties it.
-    if (!fs.existsSync(path.join(dir, '.gitignore'))) fs.writeFileSync(path.join(dir, '.gitignore'), '*\n');
-    fs.appendFileSync(path.join(dir, 'runs.jsonl'), JSON.stringify(record) + '\n');
+    fs.appendFileSync(path.join(planRunnerDir(cwd), 'runs.jsonl'), JSON.stringify(record) + '\n');
   } catch { /* best-effort: a ledger write never affects the run */ }
 }
 
@@ -129,6 +134,43 @@ function stuckSignal(records, stepId) {
     return { reason: 'restart-loop', detail: `${stepId} has started ${heads.length}× without finishing` };
   }
   return null;
+}
+
+// The commit a step attempt starts from. `commits-reverted` is a comparison of these, so it must be
+// the real HEAD, not a guess. Best-effort: no repo / no commits / no git → null, which stuckSignal
+// reads as "nothing to compare", never as stuck.
+function headSha(cwd) {
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'],
+      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || null;
+  } catch { return null; }
+}
+
+// The seven sections the Phase-1 rule (P22-S03) requires. Opened EMPTY: the runner writes only what
+// it can know, and never fabricates a finding the agent has not produced.
+const DIAGNOSIS_SECTIONS = ['Repro command + observed output', 'Expected vs actual', 'Minimised case',
+  'Ranked falsifiable hypotheses', 'Instrumentation tag', 'Confirmed cause', 'Regression test'];
+
+// Diagnosis artifact (P22-S02, D-094): the runner opens it, the agent fills it. Best-effort exactly
+// like the ledger (D-017) — a failed write is swallowed and the run continues. Diagnosis is a better
+// methodology, not a new way for a run to die. Returns the path written, or null.
+function openDiagnostic(cwd, { stepId, reason, detail, head, at }) {
+  try {
+    const dir = path.join(planRunnerDir(cwd), 'diagnostics');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${stepId}.md`);
+    fs.writeFileSync(file, [
+      `# Diagnosis — ${stepId}`, '',
+      `- Reason: \`${reason}\``,
+      `- Detail: ${detail || ''}`,
+      `- Base commit: ${head || 'unknown'}`,
+      `- Opened: ${at}`, '',
+      'Opened by the runner, filled by the agent. No hypothesis until a red-capable command has',
+      'ALREADY been run and its real output pasted below.', '',
+      ...DIAGNOSIS_SECTIONS.flatMap((h) => [`## ${h}`, '']),
+    ].join('\n'));
+    return file;
+  } catch { return null; } // best-effort: a failed artifact write never affects the run
 }
 
 // Morning digest (P09-S16): roll a finished run's ledger records into one line — "what did it do
@@ -228,6 +270,9 @@ class Runner extends EventEmitter {
     this._stepStartedAtMs = 0;   // wall-clock the current step first started (survives retries)
     this._lastResult = null;     // last `result` msg of the current step → ledger tokens/turns/cost
     this.appendLedger = appendLedger; // per-step run ledger writer; overridable in tests
+    this.readLedger = readLedger;     // ledger reader feeding stuckSignal; overridable in tests
+    this.headSha = headSha;           // base commit of a step attempt; overridable in tests
+    this.openDiagnostic = openDiagnostic; // diagnosis artifact writer; overridable in tests
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -449,9 +494,26 @@ class Runner extends EventEmitter {
     this._retries = 0;          // fresh step off the loop → fresh error-retry budget
     this._stepStartedAtMs = this.now(); // true step start (retries reuse it, so the ledger spans them)
     this._lastResult = null;
-    this.emit('status', { state: 'running', step: stepId, detail: `Running ${stepId}` });
+    const sig = this._diagnose(stepId);
+    this.emit('status', sig
+      ? { state: 'diagnosing', step: stepId, detail: `${stepId} looks stuck (${sig.reason}) — ${sig.detail}` }
+      : { state: 'running', step: stepId, detail: `Running ${stepId}` });
     this.emit('step-started', { step: stepId });
     this._startSession(stepId, this._stepPrompt(), null);
+  }
+
+  // Diagnosis trigger (P22-S02, D-094). Record THIS attempt first — it is what the count is of —
+  // then ask the ledger whether the step is stuck; on a fired signal, open the artifact. This only
+  // changes what the next session is told: nothing here interrupts, restarts or aborts the step,
+  // and both writes are best-effort, so a full disk still runs the step.
+  _diagnose(stepId) {
+    const head = this.headSha(this.project.path);
+    const at = new Date(this.now()).toISOString();
+    this.appendLedger(this.project.path, { kind: 'step-attempt', stepId, head, at });
+    const sig = stuckSignal(this.readLedger(this.project.path), stepId);
+    if (sig) this.openDiagnostic(this.project.path,
+      { stepId, reason: sig.reason, detail: sig.detail, head, at });
+    return sig;
   }
 
   // Codex ends turns early — nudge it to run the whole step to a pointer-advance (Fix P0.1.10).
@@ -746,4 +808,5 @@ class Runner extends EventEmitter {
 }
 
 module.exports = { Runner, MAX_STEPS, MAX_RETRIES, RESUME_PROMPT, gitState, stopTimeReached,
-  appendLedger, readLedger, buildDigest, stuckSignal, STUCK_REPEATS };
+  appendLedger, readLedger, buildDigest, stuckSignal, STUCK_REPEATS, openDiagnostic,
+  DIAGNOSIS_SECTIONS };

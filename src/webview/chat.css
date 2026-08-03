@@ -63,6 +63,10 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-
 .status.needs-you { color: var(--vscode-inputValidation-warningForeground, #d7a500); opacity: 1; font-weight: 600;
   background: var(--vscode-inputValidation-warningBackground, #352a05);
   border-left: 3px solid var(--vscode-inputValidation-warningBorder, #d7a500); padding-left: 7px; }
+/* Still running, but stuck and switching method (P22-S02) — informational, not a warning: it must
+   be tellable from `running` at a glance without reading as something the owner has to answer. */
+.status.diagnosing { color: var(--vscode-charts-blue, #3794ff); opacity: 1; font-weight: 600;
+  border-left: 3px solid var(--vscode-charts-blue, #3794ff); padding-left: 7px; }
 
 /* ---- Presence light (P10-S06) — advisory only, so it stays quiet ---- */
 .presence { padding: 3px 10px; font-size: 11px; opacity: .7; border-bottom: 1px solid var(--vscode-panel-border); }
