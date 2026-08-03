@@ -41,11 +41,14 @@ const output = (e) => `${(e && e.stderr) || ''}${(e && e.stdout) || ''}` || Stri
 // mechanism — `''` means "the ref must not exist" (a take), a sha means "the ref is still exactly
 // this" (a self-reclaim, P18-S03). Both are `--force-with-lease`; an unleased overwrite is banned
 // outright (§4.4), so this is the only place a claim ref is ever written.
-function cas(cwd, { step, driver, host, ts } = {}, lease = '',
+function cas(cwd, { step, driver, host, ts, breaker, reason } = {}, lease = '',
   { exec = execFileSync, timeout = CLAIM_TIMEOUT_MS, now = () => new Date().toISOString() } = {}) {
   const ref = claimRef(step);
   const git = gitIn(cwd, exec, timeout);
-  const payload = `claim ${step}\ndriver: ${driver || ''}\nhost: ${host || ''}\nts: ${ts || now()}\n`;
+  // The two extra lines appear on a BREAK only (P18-S04) — so a claim read back says not just who
+  // holds it but that it was taken by hand, by whom, and why.
+  const payload = `claim ${step}\ndriver: ${driver || ''}\nhost: ${host || ''}\nts: ${ts || now()}\n`
+    + (breaker ? `breaker: ${breaker}\nreason: ${reason}\n` : '');
   let sha;
   try {
     sha = git(['commit-tree', EMPTY_TREE], payload).trim();
@@ -76,6 +79,24 @@ const take = (cwd, payload, opts) => cas(cwd, payload, '', opts);
 // that genuinely changed hands between the read and this push is REFUSED (`held`), never stolen.
 // The other driver's claim can only ever be taken by the human break command (§4.4).
 const reclaim = (cwd, payload, sha, opts) => cas(cwd, payload, String(sha || ''), opts);
+
+// The break (§4.3's second bullet, §4.4, P18-S04): the ONLY way the OTHER driver's claim ever
+// changes hands. Deliberate, attributed and human-initiated — it is reached from a command and from
+// nowhere else, which is what leaves an unattended run unable to steal (INV-8).
+// Still leased, on the sha the human was just shown: a claim that changed hands while they were
+// deciding comes back `held`, not stolen. A bare `--force` stays banned even here (§4.4).
+// No reason, or no breaker to attribute it to, is no break — an unattributed force-update IS the
+// silent steal the mechanism exists to prevent, so this refuses before it touches git.
+function breakClaim(cwd, { step, driver, host, reason } = {}, sha, opts) {
+  const why = String(reason || '').trim();
+  const who = String(driver || '').trim();
+  if (!why || !who) {
+    return { verdict: 'refused', ref: claimRef(step), sha: null,
+      detail: `A break needs ${who ? 'a reason' : 'an identity and a reason'} — an unattributed `
+        + 'force-update is a silent steal (§4.4).' };
+  }
+  return cas(cwd, { step, driver: who, host, breaker: who, reason: why }, String(sha || ''), opts);
+}
 
 // Release is a plain ref delete (§2.6). A failed delete is NOT fatal — it degrades to the stale
 // claim of §4.3, which the holder reclaims automatically on its next run.
@@ -117,4 +138,4 @@ function holder(cwd, step, { exec = execFileSync, timeout = CLAIM_TIMEOUT_MS } =
   return { step, ref, sha, ...parsePayload(body) };
 }
 
-module.exports = { take, reclaim, release, holder, claimRef, EMPTY_TREE, CLAIM_TIMEOUT_MS };
+module.exports = { take, reclaim, breakClaim, release, holder, claimRef, EMPTY_TREE, CLAIM_TIMEOUT_MS };

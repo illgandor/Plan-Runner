@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { take, reclaim, release, holder, claimRef, EMPTY_TREE } = require('../src/claims');
+const { take, reclaim, breakClaim, release, holder, claimRef, EMPTY_TREE } = require('../src/claims');
 
 // A fake git: records every argv, and answers per-subcommand. `push` answers throw like
 // execFileSync does — non-zero exit, message on stderr.
@@ -55,6 +55,42 @@ test('a self-reclaim leases the ref on the sha just observed', () => {
 test('a self-reclaim whose lease is stale is `held`, never a steal', () => {
   const { exec } = fakeGit({ 'commit-tree': 'newsha', push: rejection(' ! [rejected] (stale info)\n') });
   assert.strictEqual(reclaim('/repo', { step: 'P18-S01' }, 'fee003a', OPTS(exec)).verdict, 'held');
+});
+
+// P18-S04, §4.3's second bullet + §4.4: the break is the other half of the stale-claim split — the
+// self-reclaim above is automatic and silent, this one is human, attributed, and reachable from a
+// command only. It is still LEASED, so "the human took too long and it changed hands" is refused.
+test('a break is attributed in the payload and leased on the sha the human was shown', () => {
+  const { exec, calls } = fakeGit({ 'commit-tree': 'brokesha\n', push: '' });
+  const r = breakClaim('/repo', { step: 'P18-S01', driver: 'tyler', host: 'tylerdesktop',
+    reason: 'reno is on holiday and the step has been held 3 days' }, 'fee003a', OPTS(exec));
+  assert.strictEqual(r.verdict, 'taken');
+  assert.deepStrictEqual(calls[1].args,
+    ['push', '--force-with-lease=refs/claims/P18-S01:fee003a', 'origin', 'brokesha:refs/claims/P18-S01'],
+    'a break force-updates, but never with a bare --force (§4.4)');
+  assert.match(calls[0].opts.input,
+    /^claim P18-S01\ndriver: tyler\nhost: tylerdesktop\nts: 2026-08-03T12:00:00Z\nbreaker: tyler\nreason: reno is on holiday and the step has been held 3 days\n$/,
+    'the payload names the breaker and the reason — that is what makes it not a silent steal');
+});
+
+test('a break with no reason, or with nobody to attribute it to, never reaches git', () => {
+  for (const bad of [{ driver: 'tyler' }, { driver: 'tyler', reason: '   ' }, { reason: 'because' }]) {
+    const { exec, calls } = fakeGit({ 'commit-tree': 'nope', push: '' });
+    const r = breakClaim('/repo', { step: 'P18-S01', ...bad }, 'fee003a', OPTS(exec));
+    assert.strictEqual(r.verdict, 'refused', JSON.stringify(bad));
+    assert.strictEqual(r.ref, 'refs/claims/P18-S01');
+    assert.match(r.detail, /reason/i, 'a refusal says what it wanted (INV-7)');
+    assert.strictEqual(calls.length, 0, 'refused BEFORE any git call — nothing is half-broken');
+  }
+});
+
+// The invariant the whole §4.3 split exists for (INV-8): the unattended loop can take, release and
+// reclaim its own, and can never break the other driver's. Asserted by reading the runner's source,
+// so a later step cannot quietly wire it in.
+test('no runner code path can reach the break', () => {
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'runner.js'), 'utf8');
+  const code = src.replace(/^\s*\/\/.*$/gm, '');   // prose may cite it; no branch may call it
+  assert.doesNotMatch(code, /breakClaim|claims\.break/, 'breaking is a human command, never a branch');
 });
 
 // §2.4. The parenthetical varies with local ref state, git version and host; the marker does not.

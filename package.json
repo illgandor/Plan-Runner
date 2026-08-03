@@ -156,6 +156,10 @@
         "title": "Plan Runner: Stop"
       },
       {
+        "command": "planRunner.breakClaim",
+        "title": "Plan Runner: Break a Step Claim (the other driver's)"
+      },
+      {
         "command": "planRunner.installSkills",
         "title": "Plan Runner: Reinstall master-plan + next-step Skills"
       }

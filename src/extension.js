@@ -10,6 +10,7 @@ const engine = require('./engine');
 const mcp = require('./mcp');
 const { Runner, readLedger, buildDigest } = require('./runner');
 const { isMasterPlan, readPointer, readPlanFraction } = require('./progress');
+const claims = require('./claims');   // ONLY for the break command — the runner has its own injection
 const skills = require('./skills');
 const updater = require('./updater');
 const { UsageService, resetText } = require('./usage');
@@ -158,6 +159,43 @@ function project() {
     stopAtTime: vscode.workspace.getConfiguration('planRunner').get('stopAtTime', '') };
 }
 function post(msg) { if (view) view.webview.postMessage(msg); }
+
+// Take a stuck claim off the other driver — a COMMAND, never a runner branch (research 03
+// §4.3/§4.4, INV-8). Nothing in the run loop can reach this function; that split is the whole
+// reason unattended running is safe, because the loop can take, release and reclaim its own but
+// can never break someone else's. Every path here needs a human: a step id, the holder shown back
+// to them, a REQUIRED reason, and a modal confirm.
+async function breakClaimCommand() {
+  const p = project();
+  if (!p) return void vscode.window.showWarningMessage('Open a project folder first.');
+  const step = ((await vscode.window.showInputBox({ title: 'Plan Runner: Break a Step Claim',
+    // No prefill: the lane-qualified pointer names OUR next step, which is precisely NOT the one
+    // the other driver is holding — a wrong default in a destructive dialog is worse than none.
+    prompt: 'Which step\'s claim should be broken? (e.g. P18-S04)',
+    validateInput: (v) => ((v || '').trim() ? null : 'Name the step whose claim you are breaking.'),
+  })) || '').trim();
+  if (!step) return;                                   // dismissed — a break is never assumed
+  const h = claims.holder(p.path, step);
+  if (!h) return void vscode.window.showInformationMessage(`No claim on ${step} — nothing to break.`);
+  const held = `${h.driver || '(unknown)'} on ${h.host || '(unknown)'} since ${h.ts || '(unknown)'}`;
+  const reason = ((await vscode.window.showInputBox({ title: `Break the claim on ${step}`,
+    prompt: `Held by ${held}. Why are you breaking it?`,
+    validateInput: (v) => ((v || '').trim() ? null : 'A break must be attributed: give a reason.'),
+  })) || '').trim();
+  if (!reason) return;
+  const go = await vscode.window.showWarningMessage(`Break the claim on ${step}? Held by ${held}.`,
+    { modal: true, detail: `It will be reattributed to you (${p.lane || 'no lane set'}) with your reason.` },
+    'Break claim');
+  if (go !== 'Break claim') return;
+  const res = claims.breakClaim(p.path, { step, driver: p.lane, host: require('os').hostname(), reason }, h.sha);
+  const msg = res.verdict === 'taken'
+    ? `Broke the claim on ${step} (was ${held}) — you hold it now. Reason: ${reason}`
+    // `held` here means it changed hands while the dialog was open; the lease caught it (§4.4).
+    : `Did not break ${step} — ${res.verdict}. ${res.detail || ''}`.trim();
+  // Not notify(): that dedupes STATUS transitions, and a second deliberate break must still be said.
+  (res.verdict === 'taken' ? vscode.window.showInformationMessage : vscode.window.showWarningMessage)(msg);
+  post({ kind: 'info', text: msg });
+}
 // Repopulate the webview's engine + model/effort/permission dropdowns for the current engine.
 function sendConfig() {
   const c = caps();
@@ -557,6 +595,7 @@ function activate(context) {
     vscode.commands.registerCommand('planRunner.toggle', () => setEnabled(!state.enabled)),
     vscode.commands.registerCommand('planRunner.start', () => onMessage({ type: 'start' })),
     vscode.commands.registerCommand('planRunner.stop', () => onMessage({ type: 'stop' })),
+    vscode.commands.registerCommand('planRunner.breakClaim', () => breakClaimCommand()),
     vscode.commands.registerCommand('planRunner.installSkills', () => {
       const note = installSkills(true) || 'Skills already up to date.';
       vscode.window.showInformationMessage(note); post({ kind: 'info', text: note });
