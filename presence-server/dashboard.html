@@ -123,6 +123,15 @@ function renderUsage(users) {
   box.appendChild(table);
 }
 
+// P20-S04. LIVE-only (§Presence: lane and claim never reach history), and absent is SILENCE, not a
+// label (D-090) — a peer who never said gets no badge, never "no claim". Wording mirrors the panel's
+// presence-view.js; the lane prints only when it is not the name already in the row (D-079 makes
+// them the same string for our own client, so both would read "Reno · lane Reno").
+function badge(l) {
+  return [l.lane && l.lane !== l.user ? 'lane ' + l.lane : null,
+    l.claim ? 'holds ' + l.claim : null].filter(Boolean).join(' · ');
+}
+
 function render(projects) {
   var out = document.getElementById('out');
   out.textContent = '';
@@ -149,6 +158,7 @@ function render(projects) {
       var s = l ? (STATE[l.state] || ['● ' + l.state, 'live']) : ['', 'dim'];
       tr.appendChild(el('td', s[0], s[1]));
       tr.appendChild(el('td', (l && l.step) || r.step || '', 'step'));
+      tr.appendChild(el('td', l ? badge(l) : '', 'step'));   // el() = textContent: the only way in
       tr.appendChild(el('td', l ? 'now' : ago(r.lastSeen), 'when'));
       table.appendChild(tr);
     });

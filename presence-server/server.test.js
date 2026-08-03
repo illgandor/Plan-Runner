@@ -477,13 +477,40 @@ test('a user name containing markup survives the wire verbatim — the server ne
   const s = await start({ now: () => 1000 });
   const evil = '<img src=x onerror=alert(1)>';
   try {
-    await s.beat({ project: PROJECT, user: evil, step: '</script>', state: 'running' });
+    await s.beat({ project: PROJECT, user: evil, step: '</script>', state: 'running',
+      lane: evil, claim: '</script>' });
     await s.usage({ user: evil, session: 42, week: null });
     const { projects: [p], users } = await (await s.projects()).json();
     assert.strictEqual(p.people[0].user, evil);   // JSON, not HTML: escaping is the PAGE's job
     assert.strictEqual(p.peers[0].step, '</script>');
+    assert.strictEqual(p.peers[0].lane, evil);    // P20-S04: the badge's inputs are remote input too
+    assert.strictEqual(p.peers[0].claim, '</script>');
     assert.strictEqual(users[0].user, evil);      // …and the usage row is remote input too
   } finally { await s.close(); }
+});
+
+// P20-S04 — the badge. A render change only: S01 already put both fields in the livePeers() record
+// that GET /projects returns, so nothing on the wire moves here (D-051). badge() is lifted out of
+// the page and run for real, because "absent shows no badge" is behaviour a regex cannot prove.
+test('the dashboard badge prints a claim, prints a differing lane, and stays silent when absent', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'dashboard.html'), 'utf8');
+  const src = html.match(/function badge\(l\) \{[\s\S]*?\n\}/);
+  assert.ok(src, 'badge() not found in dashboard.html');
+  const badge = new Function(`${src[0]}; return badge;`)();
+
+  assert.strictEqual(badge({ user: 'reno', claim: 'P20-S04' }), 'holds P20-S04');
+  assert.strictEqual(badge({ user: 'reno', lane: 'tyler', claim: 'P20-S04' }),
+    'lane tyler · holds P20-S04');
+  assert.strictEqual(badge({ user: 'reno', lane: 'reno', claim: 'P20-S04' }), 'holds P20-S04');
+  assert.strictEqual(badge({ user: 'reno' }), '');            // never said → no badge (D-090)
+  assert.strictEqual(badge({ user: 'reno', lane: 'reno' }), '');
+  // Remote input in, remote input out: badge() only joins. Escaping is el()'s textContent, asserted
+  // by the innerHTML guard above — this proves the value is never pre-formatted into markup.
+  const evil = '<img src=x onerror=alert(1)>';
+  assert.strictEqual(badge({ user: 'reno', lane: evil, claim: evil }),
+    `lane ${evil} · holds ${evil}`);
+  // …and the ONLY way it reaches the page is el(), which is textContent-only.
+  assert.match(html, /el\('td', l \? badge\(l\)/);
 });
 
 test('starting with no PRESENCE_TOKEN exits non-zero and names the reason', () => {
