@@ -16,7 +16,9 @@
 const { EventEmitter } = require('events');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const claims = require('./claims');
 const { STEP_PROMPT, CODEX_STEP_SUFFIX, MASTER_PLAN_PROMPT } = require('./constants');
 const { readPointer } = require('./progress');
 const session = require('./session');
@@ -161,6 +163,8 @@ class Runner extends EventEmitter {
     this._planSession = false; // true while the master-plan (PLAN COMPLETE) session is live (P02-S08)
     this._advancedPlan = false; // guards master-plan to once per PLAN COMPLETE (a 2nd unchanged → finish)
     this.gitCheck = gitState;  // handoff guard; overridable in tests
+    this.claims = claims;      // step claims over git refs (§Claims); overridable in tests
+    this._claim = null;        // the claim THIS run took for the current step, or null
     this.now = () => Date.now(); // wall clock for the stop-at-time ceiling; overridable in tests
     this._startedAtMs = 0;       // run start; reference for stopAtTime (set in start())
     this._retries = 0;           // error-retry attempts spent on the current step (reset per step)
@@ -318,7 +322,36 @@ class Runner extends EventEmitter {
       return this.emit('paused', { reason: `Usage — ${this._gateWhy()}; waiting to start ${next}` });
     }
     this.gating = false;
+    // Claim the step at the moment work actually starts — after the gate, never before it (D-083).
+    // A usage hold can last days, and claiming first would hold a step nobody is working on;
+    // onUsageUpdate re-enters here from the top, so the claim is taken when the hold clears and the
+    // freshness guard above is re-run for free. S03 branches on the verdict; today every verdict
+    // still runs the step.
+    this._takeClaim(next);
     this._runStep(next);
+  }
+
+  // Claims (P18-S02, §Claims). Inert with no lane configured (D-084): no lane = nobody to collide
+  // with, so a solo run pays not one extra git call and not one extra packet. There is no mode
+  // setting — the lane IS the switch.
+  _takeClaim(stepId) {
+    this._claim = null;
+    if (!this.project.lane) return null;
+    this._claim = { step: stepId, ...this.claims.take(this.project.path,
+      { step: stepId, driver: this.project.lane, host: os.hostname() }) };
+    return this._claim;
+  }
+
+  // Give it back ONLY from _advance, past the handoff guard, and only when this run is what took
+  // it: releasing on any other verdict would hand the other driver's step away, which no code path
+  // may do. Never on abort/stop/_finish either — an aborted step leaves uncommitted local work, and
+  // releasing would invite the other driver onto a step whose predecessor's edits are on a dead
+  // laptop. Self-reclaim is the recovery path and needs no help.
+  _releaseClaim(stepId) {
+    const c = this._claim;
+    this._claim = null;
+    if (!c || c.verdict !== 'taken' || c.step !== stepId) return;
+    this.claims.release(this.project.path, stepId);
   }
 
   _runStep(stepId) {
@@ -532,6 +565,9 @@ class Runner extends EventEmitter {
         detail: `${stepId} ended but close-out is incomplete (${why}). Tell it to finish the commit/push, or Stop.` });
       return;
     }
+    // The guard above is free evidence that the step's work is committed AND pushed — exactly
+    // §Claims' "release only after the close-out push". No new git call decides when.
+    this._releaseClaim(stepId);
     this.stepsRun++;
     const after = readPointer(this.project.path, this.project.lane);
     this._provider.stop(this.id); // teardown -> guarantees a fresh context next step
