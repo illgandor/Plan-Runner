@@ -86,6 +86,51 @@ function readLedger(cwd) {
   } catch { return []; }
 }
 
+// Diagnosis trigger (P22-S01, D-094): the runner decides a step is stuck by READING the ledger it
+// already keeps — never by asking the agent how it thinks it is doing. Pure: records in, one named
+// reason out, or null. Records it matches on `stepId`, beyond the completed-step record:
+//   {kind:'gate-fail',    stepId, gate}  — one focused gate run that failed
+//   {kind:'step-attempt', stepId, head}  — one start of the step, at commit `head`
+// Neither has a writer yet (A-P22-01): S02 wires the runner and the panel, and a gate result is
+// only visible from inside the session. Absent, empty or garbled input reads as "not stuck", never
+// as stuck — a best-effort ledger (D-017) may never error or mislead a caller.
+// Tuning knob for unattended runs: two repeats of the same thing is stuck. Gate-fails count
+// directly (2 failures); attempts count restarts, so it fires on the THIRD start (2 restarts).
+const STUCK_REPEATS = 2;
+
+function stuckSignal(records, stepId) {
+  const mine = (Array.isArray(records) ? records : [])
+    .filter((r) => r && typeof r === 'object' && r.stepId === stepId);
+  if (!stepId || !mine.length) return null;
+
+  // 1. The same focused gate failed STUCK_REPEATS times — retrying it again is not a method.
+  const fails = new Map();
+  for (const r of mine) {
+    if (r.kind !== 'gate-fail' || !r.gate) continue;
+    const n = (fails.get(r.gate) || 0) + 1;
+    fails.set(r.gate, n);
+    if (n >= STUCK_REPEATS) return { reason: 'gate-failed-twice',
+      detail: `the ${r.gate} gate failed ${n}× on ${stepId}` };
+  }
+
+  const heads = mine.filter((r) => r.kind === 'step-attempt' && r.head).map((r) => String(r.head));
+
+  // 2. HEAD came back to a commit it had already left: work committed for this step was undone.
+  // Checked BEFORE the restart count on purpose — a revert always costs an extra attempt, so the
+  // coarser reason would otherwise fire first and this one could never be returned.
+  for (let i = 1; i < heads.length; i++) {
+    if (heads[i] !== heads[i - 1] && heads.indexOf(heads[i]) < i - 1) {
+      return { reason: 'commits-reverted', detail: `${stepId} committed work and rolled back to ${heads[i]}` };
+    }
+  }
+
+  // 3. Started again past the restart budget — same step, same approach, third time.
+  if (heads.length > STUCK_REPEATS) {
+    return { reason: 'restart-loop', detail: `${stepId} has started ${heads.length}× without finishing` };
+  }
+  return null;
+}
+
 // Morning digest (P09-S16): roll a finished run's ledger records into one line — "what did it do
 // while I slept?" — without opening runs.jsonl. Keeps only records whose step started at/after the
 // run's start (sinceMs, append order is already chronological). Pure + exported for tests; no
@@ -701,4 +746,4 @@ class Runner extends EventEmitter {
 }
 
 module.exports = { Runner, MAX_STEPS, MAX_RETRIES, RESUME_PROMPT, gitState, stopTimeReached,
-  appendLedger, readLedger, buildDigest };
+  appendLedger, readLedger, buildDigest, stuckSignal, STUCK_REPEATS };
