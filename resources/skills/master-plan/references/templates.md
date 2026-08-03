@@ -270,6 +270,14 @@ owner-gated steps are pre-split a/b where possible (see conversion-rules.md)}}
 {{external links + §-citations into planning/reference/ — duplicated tables banned}}
 ```
 
+## 4b. .gitattributes (project root — INIT; append the line if the file exists)
+
+```gitattributes
+# Planning docs are hash-locked by planning/tools/plan_check.py. Pin markdown to LF
+# so a checkout on another machine can't change a plan's bytes and read as tampering.
+*.md text eol=lf
+```
+
 ## 5. planning/reference/GATES.md
 
 ```markdown

@@ -95,7 +95,11 @@ def read(path: Path):
 
 
 def sha256(path: Path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # CRLF is normalised to LF BEFORE hashing, so a plan hashes the same on every
+    # machine (git autocrlf, a Windows checkout, or a Python text-mode rewrite all
+    # change bytes without changing content). This means the recorded hash is
+    # deliberately NOT `sha256sum <file>` — do not "fix" it back to raw bytes.
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def section(lines, heading_prefix):
@@ -384,6 +388,15 @@ def check_plans(root: Path, hashes, progress_text):
                     if dep.startswith(f"P{nn}-") and dep > sid:
                         add("FAIL", f"step {sid} no forward dep",
                             f"depends on {dep}, which sorts after it in the same plan")
+
+        # An ACTIVE plan must be LOCKED. Without this, a DRAFT plan can own the active
+        # board and be built step by step with no hash recorded and no immutability
+        # guarantee, and every hash rule below silently declines to fire. Recipes PLAN-02
+        # ran 16 steps this way (DRAFT -> COMPLETE, hashed only at close, 2026-07-31).
+        if f"PLAN-{nn}" in active_boards and status != "LOCKED":
+            add("FAIL", f"PLAN-{nn} active plan is LOCKED",
+                f"owns the active board with status '{status}' — lock it and run "
+                "--update-hashes, or its spec is not immutable and nothing will notice")
 
         if status == "LOCKED":
             # every LOCKED plan's per-step state must be visible somewhere:

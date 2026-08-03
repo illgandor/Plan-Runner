@@ -95,7 +95,11 @@ def read(path: Path):
 
 
 def sha256(path: Path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # CRLF is normalised to LF BEFORE hashing, so a plan hashes the same on every
+    # machine (git autocrlf, a Windows checkout, or a Python text-mode rewrite all
+    # change bytes without changing content). This means the recorded hash is
+    # deliberately NOT `sha256sum <file>` — do not "fix" it back to raw bytes.
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def section(lines, heading_prefix):

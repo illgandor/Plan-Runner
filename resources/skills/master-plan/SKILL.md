@@ -104,6 +104,7 @@ clone without breaking everyone else's hash.
 <root>/SESSION_PROMPT.md    # static copy-paste bootstrap — the ONLY copy
 <root>/OWNER_TODO.md        # human actions: ## Open / ## Done audit trail
 <root>/CLAUDE.md            # gains one sentinel-delimited pointer block
+<root>/.gitattributes      # `*.md text eol=lf` — keeps hashed docs byte-stable
 <root>/planning/plans/PLAN-NN-<slug>.md      # immutable plans (hash-tracked)
 <root>/planning/reference/  # GATES.md, CONVENTIONS.md, CONTRACTS.md, runbooks
 <root>/planning/archive/    # session shards + plan closeouts (never required reading)

@@ -1,0 +1,3 @@
+# Planning docs are hash-locked by planning/tools/plan_check.py. Pin markdown to LF
+# so a checkout on another machine can't change a plan's bytes and read as tampering.
+*.md text eol=lf
