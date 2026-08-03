@@ -140,3 +140,14 @@ test('the Runner no longer excludes Codex from the usage gate', () => {
     gate.over = true;
   }
 });
+
+// A-P16-05: `$('frow').hidden = codex` (chat.js) is the ONLY thing making Codex's per-model bar
+// absent rather than an empty 0% third bar (D-075) — and `.meter .gauge{display:flex}` is
+// author-origin, so it outranks the UA's [hidden]{display:none} and the row renders anyway.
+// The repo has no webview DOM harness, so this asserts the CSS escape hatch statically: delete
+// that rule and Codex silently grows a stale third bar again.
+test('a hidden .gauge row is actually hidden — author display:flex cannot outrank it', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'webview', 'chat.css'), 'utf8');
+  assert.match(css, /\.meter\s+\.gauge\[hidden\]\s*\{[^}]*display:\s*none/,
+    'chat.css must re-assert display:none for [hidden] gauge rows');
+});

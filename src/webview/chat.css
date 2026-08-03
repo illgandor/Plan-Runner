@@ -38,6 +38,9 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-
 .meter { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; font-size: 11px;
   border-bottom: 1px solid var(--vscode-panel-border); }
 .meter .gauge { display: flex; align-items: center; gap: 6px; }
+/* The rule above is author-origin, so it BEATS the UA's [hidden]{display:none} — without this a
+   `.hidden = true` gauge row keeps rendering (Codex's per-model bar did, A-P16-05). D-075. */
+.meter .gauge[hidden] { display: none; }
 .meter .glabel { width: 48px; opacity: .8; }
 .meter .gpct { width: 34px; text-align: right; opacity: .85; font-variant-numeric: tabular-nums; }
 .meter progress { flex: 1; height: 8px; appearance: none; -webkit-appearance: none; border: none; border-radius: 4px; }
