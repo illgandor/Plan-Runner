@@ -244,6 +244,77 @@ def drop_ignored(foot, ignore):
     return [t for t in foot if not covered(t)]
 
 
+def roster_lanes(progress_text):
+    """The lanes DECLARED on the board's roster line (`Drivers: a · b — relay.`).
+    That line is the only place a lane is declared: a lane is not plan content
+    (INV-3), and it never becomes a board column — E3 measured that a prepended
+    column makes every row unrecognised at once and board parity collapses."""
+    m = re.search(r"^Drivers:\s*(.*?)(?:\s+—.*)?$", progress_text, re.M)
+    return [p.strip().rstrip(".").strip() for p in m.group(1).split("·")
+            if p.strip()] if m else []
+
+
+def lane_rules(progress_text, plan_text):
+    """Research 07 §4.1's four provable lane defects, as (check, detail) rows the
+    caller adds as FAILs. All four are gated on the file carrying at least one
+    `NEXT[<lane>]:` pointer, so a solo PROGRESS.md runs today's rule set
+    unchanged (INV-5) — this project is solo and its own output must not move by
+    a single line. They FAIL rather than WARN because each is provable from the
+    docs alone (§4 — certainty, not severity), and because an overlapping split's
+    damage otherwise lands at close-out, after both drivers have already spent a
+    session each (§4.2). W-a..W-d stay WARNs: promoting W-a would make 15 of 111
+    LOCKED, hashed steps permanently red and E1 proves they cannot be edited to
+    fix it — a rule that cannot be satisfied is a broken gate, not enforcement."""
+    lines = progress_text.splitlines()
+    s, e = section(lines, "▶ NEXT STEP")
+    if s == -1:
+        return []
+    ptrs = [(m.group(1), m.group(2)) for ln in lines[s + 1:e]
+            for m in [NEXT_RE.match(ln)] if m and m.group(1)]
+    if not ptrs:
+        return []                    # bare pointers: none of this exists in solo
+    out = []
+    steps = plan_steps(plan_text.splitlines())
+    foot = {sid: drop_ignored(f, lane_ignore(progress_text)) for sid, _, f in steps}
+    live = [(lane, t) for lane, t in ptrs if STEP_ID_RE.fullmatch(t)]
+
+    # F-a — the entire safety claim of a split, and the one half the checker can
+    # actually see (§F-5: disjointness is necessary, not sufficient). overlaps()
+    # reads unprovable as conflicting, so a vague footprint refuses the pairing.
+    for i, (la, ta) in enumerate(live):
+        for lb, tb in live[i + 1:]:
+            fa, fb = foot.get(ta, []), foot.get(tb, [])
+            if steps and ta != tb and overlaps(fa, fb):
+                out.append(("lane footprints are disjoint",
+                            f"'{la}' runs {ta} ({' · '.join(fa) or 'no footprint'})"
+                            f" while '{lb}' runs {tb} ({' · '.join(fb) or 'no footprint'})"
+                            " — not provably disjoint, so they cannot run at once"))
+    # F-b — a step assigned to nobody, silently.
+    declared = roster_lanes(progress_text)
+    for lane in dict.fromkeys(l for l, _ in ptrs):
+        if lane not in declared:
+            out.append(("pointer lane is on the board's roster line",
+                        f"NEXT[{lane}] names a lane the roster does not declare"
+                        f" ({' · '.join(declared) or 'there is no Drivers: line'})"))
+    # F-c — both drivers run it, and doc 03's claim only catches that late, at cost.
+    seen = {}
+    for lane, t in live:
+        if t in seen:
+            out.append(("one step, one lane",
+                        f"{t} is claimed by both '{seen[t]}' and '{lane}' — both"
+                        " drivers would run it and the claim catches that late"))
+        seen.setdefault(t, lane)
+    # F-d — the lane never unblocks and the run ends idle forever. Skipped when
+    # there is no plan text: absence cannot be proven against nothing.
+    for lane, t in ptrs if steps else []:
+        tgt = t[len("WAIT "):] if t.startswith("WAIT ") else ""
+        if tgt and not set(foot) & {tgt, re.sub(r"[ab]$", "", tgt)}:
+            out.append(("WAIT names a step in the plan",
+                        f"'{lane}' waits on {tgt}, which is not a step of this"
+                        " plan — that lane can never unblock"))
+    return out
+
+
 def step_block(lines, start, end):
     """The block for the step heading at `start`: up to the next heading of ANY
     level (## section, ### milestone), not just the next #### step, trailing
@@ -437,6 +508,51 @@ def selftest():
     checks.append(("…but never what is above it",
                    drop_ignored(["src/"], ["src/webview/chat.js"]), ["src/"]))
 
+    # The four laned FAILs (research 07 §4.1). lane_rules() takes two strings, so
+    # a purpose-built fixture needs no repo on disk — and every rule is proven
+    # SILENT on a correct split as well as loud on a broken one.
+    fx_plan = ("#### [P99-S01] a  `[M]`  `[deps: —]`  `[owner-gate: no]`\n"
+               "**Files:** src/a.js\n\n"
+               "#### [P99-S02] b  `[M]`  `[deps: —]`  `[owner-gate: no]`\n"
+               "**Files:** src/b.js\n\n"
+               "#### [P99-S03] c  `[M]`  `[deps: P99-S01]`  `[owner-gate: no]`\n"
+               "**Files:** src/a.js · package.json\n\n"
+               "#### [P99-S04] d  `[M]`  `[deps: —]`  `[owner-gate: no]`\n"
+               "**Files:** src/c.js · package.json\n")
+
+    def fired(*ptrs, roster="Drivers: ann · bo — parallel.", ignore=""):
+        fx = ("## ▶ NEXT STEP\n" + "\n".join(ptrs)
+              + "\n\n## Board — PLAN-99 (active)\n" + roster + "\n" + ignore)
+        return [c for c, _ in lane_rules(fx, fx_plan)]
+
+    checks.append(("a correct split fires nothing",
+                   fired("NEXT[ann]: P99-S01", "NEXT[bo]: P99-S02"), []))
+    checks.append(("F-a overlapping lane footprints",
+                   fired("NEXT[ann]: P99-S01", "NEXT[bo]: P99-S03"),
+                   ["lane footprints are disjoint"]))
+    checks.append(("F-a honours the declared ignore list",
+                   fired("NEXT[ann]: P99-S03", "NEXT[bo]: P99-S04",
+                         ignore="Lane-ignore: package.json\n"), []))
+    checks.append(("…and without it the same pair conflicts",
+                   fired("NEXT[ann]: P99-S03", "NEXT[bo]: P99-S04"),
+                   ["lane footprints are disjoint"]))
+    checks.append(("F-b a pointer lane the roster never declared",
+                   fired("NEXT[ann]: P99-S01", "NEXT[cy]: P99-S02"),
+                   ["pointer lane is on the board's roster line"]))
+    checks.append(("F-c two lanes naming one step",
+                   fired("NEXT[ann]: P99-S01", "NEXT[bo]: P99-S01"),
+                   ["one step, one lane"]))
+    checks.append(("F-d WAIT on a step outside the plan",
+                   fired("NEXT[ann]: P99-S01", "NEXT[bo]: WAIT P99-S09"),
+                   ["WAIT names a step in the plan"]))
+    checks.append(("…and WAIT on a real step is silent",
+                   fired("NEXT[ann]: P99-S01", "NEXT[bo]: WAIT P99-S01"), []))
+    checks.append(("every laned rule is inert on a bare, solo pointer",
+                   fired("NEXT: P99-S01", roster=""), []))
+    checks.append(("the roster line is parsed off the board",
+                   [roster_lanes("Drivers: ann · bo — relay.\n"), roster_lanes("x\n")],
+                   [["ann", "bo"], []]))
+
     # …and on the REAL intra-plan graph, not just a toy one: every plan in this
     # project schedules every step exactly once. A vendored copy has no plans
     # directory beside it and simply contributes no rows here.
@@ -446,6 +562,18 @@ def selftest():
         checks.append((f"{f.name} schedules every step once",
                        sorted(s for rd in schedule(real) for s in rd),
                        sorted(s for s, _, _ in real)))
+
+    # W-a and W-b stay WARNs (§4.3). The corpus's vague and `n/a` footprints sit
+    # on LOCKED, hashed steps that cannot be edited to satisfy a FAIL (E1), and
+    # none of the four rules above can reach them: this project is solo, so
+    # lane_rules is inert on its own PROGRESS.md whatever those footprints say.
+    prog = Path("PROGRESS.md")
+    if pdir.is_dir() and prog.is_file():
+        soft = [sid for f in sorted(pdir.glob("PLAN-*.md"))
+                for sid, _, foot in plan_steps(read(f).splitlines())
+                if not foot or any(not is_path_token(t) for t in foot)]
+        checks.append(("the soft-footprint corpus stays WARN-only",
+                       len(soft) >= 15 and lane_rules(read(prog), "") == [], True))
 
     bad = [c for c in checks if c[1] != c[2]]
     for label, got, want in bad:
@@ -489,7 +617,7 @@ def check_progress(root: Path):
     s, e = section(lines, "▶ NEXT STEP")
     # One cursor per lane. A solo file has exactly one, unlaned — every rule below
     # then reduces to the single-cursor behaviour it had before lanes existed.
-    next_ptrs, next_ids, plan_path = [], [], None
+    next_ptrs, next_ids, plan_path, plan_text = [], [], None, ""
     if s == -1:
         add("FAIL", "▶ NEXT STEP section", "missing")
     else:
@@ -529,6 +657,10 @@ def check_progress(root: Path):
                                for i in (next_id, re.sub(r"[ab]$", "", next_id))):
                         add("FAIL", "NEXT step exists in its plan file",
                             f"[{next_id}] not found in {plan_path.name}")
+
+    # The four laned FAILs (research 07 §4.1) — inert unless a pointer is lane-qualified.
+    for chk, det in lane_rules(text, plan_text):
+        add("FAIL", chk, det)
 
     # Session log — ONE bare section (the solo form) or one per driver, never a mix.
     # Every section is validated independently under the same rules; validating only
