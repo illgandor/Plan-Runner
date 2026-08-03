@@ -60,11 +60,47 @@ State the detected mode before acting. All modes end with STEP 4.
    research and roadmap first, PLAN-01 built from its output). Below that, say
    nothing and convert. Rules and the exact offer:
    `references/conversion-rules.md` §Discovery plan.
-5. **Ask: will one person drive this plan, or several?** (INIT and NEW-PLAN.)
-   Several → record it as a Locked decision, and write the §Shared-repo rules
-   block of CONVENTIONS.md (`references/templates.md` §6). It changes no step
-   spec — it sets the close-out discipline that keeps two drivers from
-   colliding. One person → say so in Facts; the section is omitted.
+5. **Ask: will one person drive this project, or more than one?** (INIT only —
+   NEW-PLAN asks the one-line version below instead.) Verbatim:
+
+   > Will one person drive this project, or more than one? **One** is the default
+   > and costs nothing — say one and nothing changes anywhere. More than one has
+   > two shapes: **relay**, where you take turns and the tool tells the other
+   > person when the baton is theirs, or **parallel**, where you both run steps
+   > at the same time in separate lanes. Relay works on every plan; parallel only
+   > pays off on plans that actually split, which is about two thirds of them.
+   > Relay first is the safe answer — moving to parallel later costs one line.
+   > Which?
+
+   One → say so in Facts; the §Shared-repo rules section is omitted, the board
+   gets no roster line, and nothing changes anywhere. Relay or parallel → record
+   the mode as a Locked decision in the plan being converted, and write the
+   §Shared-repo rules block of CONVENTIONS.md with its mode-and-drivers line plus
+   the board's roster line (`references/templates.md` §1 and §6). It changes no
+   step spec — it sets the close-out discipline that keeps two drivers from
+   colliding.
+
+   **In NEW-PLAN ask this instead, and only in a non-solo project** — one line,
+   because the mode is already recorded and the answer is almost always "same".
+   A paragraph every plan is how an opt-in becomes noise the owner declines
+   reflexively. Fill in the recorded drivers, mode and plan id:
+
+   > This project is set up for two drivers (tyler, reno) in **relay** mode. Same
+   > for PLAN-05, or does this one change?
+
+   **Ask the driver's own lane name** only when the mode is not solo AND
+   `planRunner.presenceName` is unset. Verbatim:
+
+   > What is your lane name? It has to match `planRunner.presenceName` in your VS
+   > Code settings — the same string is the lane, the claim's driver, and the
+   > name on the presence dashboard.
+
+   Never ask for that name again under a different label — two labels make two
+   names for one identity, and display names that differ are invisible to each
+   other on the presence dashboard. Write the answer into §Shared-repo rules.
+
+   A **chained** conversion (item 6) re-asks none of these three: it carries the
+   recorded mode and drivers forward unchanged, or it does not chain.
 6. **Ask: should each plan hand off to the next one by itself?** (INIT, after the
    roadmap scope is known.) **Ask only when something is queued after this plan** —
    no ROADMAP, no plan named after this one, or a one-plan project all mean there is
