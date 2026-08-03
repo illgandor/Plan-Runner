@@ -246,11 +246,16 @@ class Runner extends EventEmitter {
     this.emit('done', { state, detail, startedAtMs: this._startedAtMs }); // sinceMs for the run digest (P09-S16)
   }
 
-  // The usage gate polls CLAUDE account usage; it's meaningless for a Codex run (different
-  // account, no source), so never pause a Codex step on it. (Codex usage % is N/A — see the panel.)
+  // The usage gate now speaks for whichever engine the poller is reading (P16-S08): the gate used
+  // to be skipped outright on Codex because no Codex source existed, and a Codex run would happily
+  // burn straight through its weekly limit into hard server rejections. It reads one snapshot, so
+  // there is nothing engine-shaped left here to branch on.
   // The model goes to the gate because one of its limits is per-model: a Fable weekly at its
-  // limit must not hold a run on another model.
-  _over() { return (this.project.engine || 'claude') !== 'codex' && !!(this.usageGate && this.usageGate.isOverThreshold(this.project.model)); }
+  // limit must not hold a run on another model. (Codex has no per-model window at all — D-075 —
+  // so that limit simply never matches there.)
+  // Codex's ONLY release from a hold is the reset clock (S04): there is no active query to fall
+  // back on, so if that regresses Codex deadlocks where Claude would not.
+  _over() { return !!(this.usageGate && this.usageGate.isOverThreshold(this.project.model)); }
 
   // Which limit is holding the run, named. A weekly hold can last days where a session hold lasts
   // hours, so "usage at/above threshold" alone doesn't say what you're waiting on. Optional on the

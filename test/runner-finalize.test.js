@@ -69,14 +69,17 @@ test('Codex step prompt gets the CODEX_STEP_SUFFIX; Claude does not', () => {
   assert.doesNotMatch(grab('claude'), /Complete the ENTIRE step/, 'Claude keeps the plain step prompt');
 });
 
-test('usage gate is inert on Codex — never pauses a Codex run on Claude usage', () => {
+// P16-S08 RETIRED this test's old claim ("inert on Codex"). It was right only while no Codex usage
+// source existed: the gate read Claude's account, so applying it to Codex would have paused on a
+// number from the wrong subscription. Now the poller reads whichever engine is selected, so the
+// gate is engine-agnostic — see test/usage-engine.test.js for the release path that makes it safe.
+test('the usage gate applies to BOTH engines — it reads the selected engine s own account', () => {
   const over = { isOverThreshold: () => true };
-  const codex = new Runner({ id: 'c', path: '.', engine: 'codex', model: '(default)', effort: '(default)', mode: 'auto' });
-  codex.usageGate = over;
-  assert.equal(codex._over(), false, 'Codex must ignore the Claude usage gate');
-  const claude = new Runner({ id: 'd', path: '.', engine: 'claude', model: '(default)', effort: '(default)', mode: 'auto' });
-  claude.usageGate = over;
-  assert.equal(claude._over(), true, 'Claude still gates on usage');
+  for (const engine of ['codex', 'claude']) {
+    const r = new Runner({ id: engine, path: '.', engine, model: '(default)', effort: '(default)', mode: 'auto' });
+    r.usageGate = over;
+    assert.equal(r._over(), true, `${engine} gates on its own usage`);
+  }
 });
 
 test('finalizeMs=0 disables the window — advances immediately', (t) => {

@@ -377,9 +377,10 @@ async function onMessage(m) {
       sendConfig(); // repopulate all four dropdowns for the new engine
       seedModels(); // switched to Claude with an empty cache → seed the versioned catalog (P10)
       notifyIfAutoReviewGated(); // explain the missing auto/acceptEdits on an old Codex CLI
-      // Codex exposes no account usage — stop the Claude poller (this window only) and repaint
-      // the meter as N/A; Claude resumes it. Per-window: never touches another window's poller.
-      if (state.engine === 'codex') usage.stop(); else usage.start();
+      // Swap the usage SOURCE to the new engine's (P16-S08) — it drops the old account's readings
+      // so the panel can't paint Claude's numbers as Codex's, and re-arms the poll on the new one.
+      // Per-window: never touches another window's poller.
+      usage.setEngine(state.engine);
       postUsage(usage.snapshot());
       break;
     }
@@ -534,14 +535,15 @@ function activate(context) {
   if (skillsStale) context.globalState.update('planRunner.skillsVersion', skillsFor);
   updater.start(context);           // poll GitHub Releases for a newer .vsix (D-003)
 
-  // Account-wide usage poller, seeded from application-scoped §Config (D-004).
-  usage = new UsageService(usageConfig());
+  // Account-wide usage poller, seeded from application-scoped §Config (D-004). The SOURCE is
+  // picked by engine at construction (P16-S08) — Claude polls `/usage`, Codex reads its rollout.
+  usage = new UsageService({ ...usageConfig(), engine: state.engine });
   // Presence FIRST, then the gate, then the repaint. onUsageUpdate() can run _runNext()/_pause()
   // — the whole step machine — and postUsage() touches the webview; a throw in either used to
   // starve the reading that trails them, and a fire-and-forget report must not ride behind the
   // runner state machine. It reports on presence's own already-armed tick (D-053), not this poll.
   usage.on('update', (s) => { presence?.setUsage(s); if (runner) runner.onUsageUpdate(); postUsage(s); });
-  if (state.engine !== 'codex') usage.start(); // Codex has no usage source — don't poll Claude for it
+  usage.start(); // both engines have a source now (P16-S08) — the fetcher above is the difference
 
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusItem.command = 'planRunner.toggle';

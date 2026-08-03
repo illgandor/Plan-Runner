@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { findClaude } = require('./claude-path');
+const { codexFetch } = require('./codex-usage');
 
 const SESSION_RE = /Current session:\s*(\d+)%/;
 const WEEK_RE = /Current week \(all models\):\s*(\d+)%/;
@@ -246,9 +247,20 @@ function usesModel(model, label) {
   return String(model).toLowerCase().includes(String(label).toLowerCase());
 }
 
+// P16-S08: which source this engine reads from. The whole engine difference is ONE function
+// reference — Claude keeps `defaultFetch` byte for byte (D-072) and Codex reads its rollout file
+// (D-074: independent paths, never merged). Everything downstream — the bars, the reset clock, the
+// gate, the anti-flicker rule — is engine-agnostic because both fetchers resolve the same shape.
+function fetcherFor(engine) { return engine === 'codex' ? codexFetch : defaultFetch; }
+
 class UsageService extends EventEmitter {
-  constructor({ threshold = 90, weekThreshold = 90, fableThreshold = 90, pollSec = 60, fetch = defaultFetch } = {}) {
+  // `engine` picks the source (P16-S08); `fetch` still overrides it outright, which is the seam
+  // every test drives and the reason the engine is tracked by NAME rather than inferred from
+  // whichever function ended up installed.
+  constructor({ threshold = 90, weekThreshold = 90, fableThreshold = 90, pollSec = 60,
+    engine = 'claude', fetch = fetcherFor(engine) } = {}) {
     super();
+    this.engine = engine === 'codex' ? 'codex' : 'claude';
     this.threshold = threshold;           // session limit %
     this.weekThreshold = weekThreshold;   // weekly (all models) limit %
     this.fableThreshold = fableThreshold; // per-model weekly limit % (model-scoped, see usesModel)
@@ -273,6 +285,26 @@ class UsageService extends EventEmitter {
   // is already armed or in flight, and don't let a poll that resolves after stop() re-arm.
   start() { this.stopped = false; if (this._timer == null && !this._inFlight) this._tick(); }
   stop() { this.stopped = true; clearTimeout(this._timer); this._timer = null; }
+
+  // Switch which engine's usage this poller reads (P16-S08). Swapping the fetcher is not enough:
+  // every reading held here belongs to the OLD account, and the anti-flicker rule would faithfully
+  // keep painting Claude's 82% as Codex's until a Codex reading landed — the one case where "keep
+  // last-good" is a lie rather than a kindness. So the readings are DROPPED with the source, which
+  // is also what makes a machine that has never run Codex render "unknown" and never 0% (D-074:
+  // the two engines' readings never merge). Idempotent: same engine → no-op, so a repaint or a
+  // second switch to the engine already selected cannot throw away a good reading.
+  setEngine(engine) {
+    const next = engine === 'codex' ? 'codex' : 'claude';
+    if (next === this.engine) return;
+    this.stop();
+    this.engine = next;
+    this.fetch = fetcherFor(next);
+    this.session = this.week = this.fable = null;
+    this.sessionResetsAt = this.weekResetsAt = null;
+    this.events = {};
+    this.max = this.checked = this.error = null;
+    this.start();
+  }
 
   async _tick() {
     this.stopped = false; // a fresh tick (start or self-reschedule) is live until stop() says otherwise
@@ -440,6 +472,6 @@ class UsageService extends EventEmitter {
 }
 
 module.exports = {
-  UsageService, defaultFetch, cleanupUsageSession, parseUsageText, parseResets, parseResetAt, resetText,
+  UsageService, defaultFetch, fetcherFor, cleanupUsageSession, parseUsageText, parseResets, parseResetAt, resetText,
   spawnArgs, pollEnv, usesModel, eventPct, eventResetAt, FETCH_TIMEOUT_MS, EVENT_DIVERGENCE_PCT,
 };

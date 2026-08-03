@@ -21,7 +21,7 @@
       <div class="gauge" id="srow"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span><span class="grst" id="srst" hidden></span></div>
       <div class="gauge" id="wrow"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span><span class="grst" id="wrst" hidden></span></div>
       <div class="gauge" id="frow"><span class="glabel" id="flabel">Fable</span><progress id="fbar" max="100" value="0"></progress><span class="gpct" id="fpct">—</span></div>
-      <div class="gauge tokrow" id="tokrow" style="display:none" title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
+      <div class="gauge tokrow" id="tokrow" style="display:none" title="Total tokens processed this run (input incl. cached + output). Codex only."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
       <div class="uerr" id="uerr" hidden></div>
       <div class="uerr" id="udiv" hidden></div>
     </div>
@@ -647,7 +647,7 @@
     '- The per-model limit is scoped to the model you picked: it can\'t hold a run on a different model (that bar dims when it doesn\'t apply).',
     '- A missing reading never pauses anything: the meter keeps its last good numbers rather than blanking, and the gate only ever trips on a real number.',
     '- When a poll fails, the bars **dim** and a ⚠ line says why and how old the reading is — dimmed bars are frozen, not current. Two windows can only disagree if one of them is showing a stale reading.',
-    '- *Claude only*: Codex reports no account usage %, so it shows **N/A** plus a token counter instead.',
+    '- **Codex** gets the same Session and Week bars, the same pause limits and the same reset clock — read from its own rollout file, so they only appear once you have run one Codex turn. It has no per-model week, so that bar is hidden; it gains a per-run token counter instead.',
     '',
     '## Leaving it running overnight',
     '',
@@ -739,31 +739,25 @@
     const modelScoped = !!(d.model && d.fableLabel
       && String(d.model).toLowerCase().includes(String(d.fableLabel).toLowerCase()));
     $('frow').classList.toggle('inert', !modelScoped);
-    if (codex) {
-      // Codex has no account usage % — show N/A instead of the stale Claude reading, and
-      // surface the token counter. The pause-gate is inert on Codex, so no over/warn/paused.
-      naBar($('sbar'), $('spct')); naBar($('wbar'), $('wpct')); naBar($('fbar'), $('fpct'));
-      $('tokval').textContent = sessionTokens ? fmt(sessionTokens) : '—';
-      ['srow', 'wrow', 'frow'].forEach((r) => $(r).classList.remove('over', 'warn'));
-      m.classList.remove('paused');
-      m.classList.add('codex');
-    } else {
-      m.classList.remove('codex');
-      // Each bar carries its OWN limit now, so over/warn is per-row: whichever one trips is the
-      // one that pauses, and the loop stays paused until every one of them is back under.
-      paintGauge($('srow'), $('sbar'), $('spct'), d.session, d.threshold);
-      paintGauge($('wrow'), $('wbar'), $('wpct'), d.week, d.weekThreshold);
-      paintGauge($('frow'), $('fbar'), $('fpct'), d.fable, modelScoped ? d.fableThreshold : null);
-      m.classList.toggle('paused', !!d.paused); // hook painted by S08
-    }
-    // The reset clock (D-076), outside the engine branch on purpose: it is whatever the snapshot
-    // supplied, so Codex gets it for free at S08 with no second renderer.
+    // Codex has no per-model weekly window AT ALL (D-075, measured 223/223) — so that bar is
+    // ABSENT, not empty and not repurposed. An empty third bar would read as "0% used".
+    $('frow').hidden = codex;
+    if (codex) $('tokval').textContent = sessionTokens ? fmt(sessionTokens) : '—';
+    // Both engines now feed the same bars from the same snapshot (P16-S08) — one renderer, no
+    // engine branch. Each bar carries its OWN limit, so over/warn is per-row: whichever one trips
+    // is the one that pauses, and the loop stays paused until every one of them is back under.
+    paintGauge($('srow'), $('sbar'), $('spct'), d.session, d.threshold);
+    paintGauge($('wrow'), $('wbar'), $('wpct'), d.week, d.weekThreshold);
+    if (!codex) paintGauge($('frow'), $('fbar'), $('fpct'), d.fable, modelScoped ? d.fableThreshold : null);
+    m.classList.toggle('paused', !!d.paused);
+    // The reset clock (D-076): whatever the snapshot supplied, for whichever engine supplied it.
     setReset($('srst'), d.sessionResets);
     setReset($('wrst'), d.weekResets);
-    // The two Claude sources disagreeing, only while they do (P16-S06). The host sends a formed
-    // sentence or null, so this decides nothing — same contract as the reset clock above.
-    setReset($('udiv'), d.divergence && !codex ? '↯ ' + d.divergence : '');
-    paintUsageError(d, codex);
+    // The two CLAUDE sources disagreeing, only while they do (P16-S06). Codex has one source, so
+    // the host never sends this for it. The host sends a formed sentence or null — this decides
+    // nothing, same contract as the reset clock above.
+    setReset($('udiv'), d.divergence ? '↯ ' + d.divergence : '');
+    paintUsageError(d);
   }
   // Hidden when there is nothing to say — an empty span would still take the row's flex gap, and
   // "no clock" must cost no pixels (never "unknown", never a zero clock).
@@ -787,16 +781,19 @@
   // pixel-identical and the only tell was a hover tooltip. Two windows on one account then quietly
   // disagree by however much drifted while one of them stopped polling. Say it on EVERY failed poll,
   // and dim the bars so the numbers themselves read as untrustworthy. (D-058)
-  function paintUsageError(d, codex) {
+  //
+  // Engine-agnostic since P16-S08: a Codex reading fails the same ways (no rollout yet, a torn
+  // file) and its error is worth exactly as much as Claude's — the reader phrases its own reason.
+  function paintUsageError(d) {
     const e = $('uerr');
     const painted = d.session != null || d.week != null; // a last-good reading is on screen
-    const stale = !codex && !!d.error;                   // ...and the latest poll did not refresh it
+    const stale = !!d.error;                             // ...and the latest poll did not refresh it
     const age = d.checked ? ` · reading from ${agoText(Date.now() - d.checked)} ago` : '';
     e.hidden = !stale;
     if (stale) e.textContent = '⚠ ' + d.error + (painted ? ` — showing the last good reading${age}` : '');
     $('meter').classList.toggle('stale', stale && painted);
-    $('meter').title = codex ? 'Codex reports no account usage %'
-      : (d.error ? `Last usage check failed: ${d.error}${age}` : (d.checked ? `Usage checked ${agoText(Date.now() - d.checked)} ago` : ''));
+    $('meter').title = d.error ? `Last usage check failed: ${d.error}${age}`
+      : (d.checked ? `Usage checked ${agoText(Date.now() - d.checked)} ago` : '');
   }
   function agoText(ms) {
     const s = Math.max(0, Math.round(ms / 1000));
@@ -806,7 +803,6 @@
     if (v == null) return;            // keep last-good; never blank
     bar.value = v; txt.textContent = v + '%';
   }
-  function naBar(bar, txt) { bar.value = 0; txt.textContent = 'N/A'; } // Codex: no % source
 
   // items are plain strings (model/effort/engine) OR {value,label} objects (permission modes).
   function fill(sel, items, chosen) {
