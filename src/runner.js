@@ -20,7 +20,7 @@ const os = require('os');
 const path = require('path');
 const claims = require('./claims');
 const { STEP_PROMPT, CODEX_STEP_SUFFIX, MASTER_PLAN_PROMPT } = require('./constants');
-const { readPointer } = require('./progress');
+const { readPointer, isLaned } = require('./progress');
 const session = require('./session');
 const engine = require('./engine');
 
@@ -306,6 +306,13 @@ class Runner extends EventEmitter {
             + '`git pull --ff-only` cannot succeed — rebase or merge them yourself, then Start again.'));
     }
     const next = readPointer(this.project.path, this.project.lane);
+    // A laned PROGRESS.md read by someone with no lane: readPointer correctly refuses (D-080), but
+    // the generic reason below is flatly WRONG here — it is a master-plan project, and it has a
+    // pointer. A correct stop with a useless reason is the one outcome INV-7 forbids, so name the
+    // setting that fixes it (D-087: non-solo needs an explicit planRunner.presenceName).
+    if (!next && !this.project.lane && isLaned(this.project.path))
+      return this._finish('error', 'This project uses lane-qualified pointers (NEXT[<lane>]:), so it '
+        + 'has more than one driver — set planRunner.presenceName to your lane name, then Start again.');
     if (!next) return this._finish('error', 'No NEXT pointer / PROGRESS.md — not a master-plan project');
     if (/^none/i.test(next)) return this._finish('done', `Project complete (${next})`);
     // Join wait / relay stop (research 06 §5.1–5.4): the wait is WRITTEN into the pointer, never

@@ -28,6 +28,14 @@ function readPointer(dir, lane) {
   } catch { return null; }
 }
 
+// Does this project's PROGRESS.md use lane-qualified pointers? The pointer form IS the mode
+// (D-085) — there is no mode setting to read — so this is the one honest answer to "is this
+// project non-solo". Unreadable / not a master-plan project reads as solo, exactly as
+// readPointer's null does: the caller's existing "no pointer" path already covers that.
+function isLaned(dir) {
+  try { return LANE_POINTER_RE.test(fs.readFileSync(progressPath(dir), 'utf8')); } catch { return false; }
+}
+
 // Overall plan progress from the Dashboard "**All plans: X/Y steps complete.**"
 // line, or null if unreadable / line absent (CONTRACTS §PLAN-09).
 function readPlanFraction(dir) {
@@ -38,4 +46,4 @@ function readPlanFraction(dir) {
   } catch { return null; }
 }
 
-module.exports = { progressPath, isMasterPlan, readPointer, readPlanFraction };
+module.exports = { progressPath, isMasterPlan, readPointer, isLaned, readPlanFraction };

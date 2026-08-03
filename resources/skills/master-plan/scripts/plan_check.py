@@ -669,9 +669,20 @@ def check_misc(root: Path):
         add("FAIL", "planning/reference/GATES.md exists",
             "missing — steps and SESSION_PROMPT resolve gate names from this file")
     conv = root / "planning" / "reference" / "CONVENTIONS.md"
+    # W-d: a lane-qualified pointer IS the non-solo mode — there is no mode setting
+    # anywhere — and the mode and the drivers are written in §Shared-repo rules.
+    # Nothing machine-read lives in that section, so its absence is drift, not
+    # damage: WARN, never FAIL.
+    prog = root / "PROGRESS.md"
+    laned = any((m := NEXT_RE.match(ln)) and m.group(1)
+                for ln in (read(prog).splitlines() if prog.exists() else []))
     if not conv.exists():
         add("WARN", "planning/reference/CONVENTIONS.md exists",
             "missing — rotation/split/amendment rules live there")
+    elif laned and "## Shared-repo rules" not in read(conv):
+        add("WARN", "CONVENTIONS.md §Shared-repo rules exists",
+            "the pointer is lane-qualified (more than one driver) but the mode and"
+            " the drivers are written nowhere")
     arch = root / "planning" / "archive"
     if arch.exists():
         for f in arch.glob("SESSIONS-*.md"):

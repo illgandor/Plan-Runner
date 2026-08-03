@@ -5,10 +5,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const {
   heartbeat, peers, reportUsage, displayName, startPresence, runState,
   TIMEOUT_MS, RUNNING_MS, IDLE_MS,
 } = require('../src/presence');
+const { readPointer, isLaned } = require('../src/progress');
 
 // projectId + `git config user.name` both go through exec; stub it so tests never depend on git.
 const exec = (_cmd, args) =>
@@ -46,6 +49,34 @@ test('happy path: heartbeat posts the contract body and peers filters us out', a
 
     assert.deepStrictEqual(await peers(opts(url)), [{ user: 'Reno', step: 'P10-S05', state: 'running' }],
       'the caller filters ITSELF out by user');
+  } finally { server.close(); }
+});
+
+// P19-S04 / D-087: ONE string is the lane, the claim's `driver` and the presence `user`. Were they
+// allowed to differ, the dashboard would name a person the pointer has never heard of and the claim
+// would be attributed to a third. The claim third is asserted in runner-lane.test.js ("the lane is
+// the driver"); the other two are asserted here, off the same string.
+test('one identity: the lane reads the pointer AND is what presence reports as the user', async () => {
+  const LANE = 'reno';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-runner-identity-'));
+  fs.writeFileSync(path.join(dir, 'PROGRESS.md'),
+    `## ▶ NEXT STEP\nNEXT[tyler]: P19-S03\nNEXT[${LANE}]: P19-S04\n`);
+  assert.strictEqual(readPointer(dir, LANE), 'P19-S04', 'the lane is what resolves the pointer');
+  assert.strictEqual(isLaned(dir), true, 'the pointer form IS the mode — no setting is consulted');
+
+  const bodies = [];
+  const { server, url } = await serve((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => { bodies.push(JSON.parse(body)); rs.writeHead(204).end(); });
+  });
+  try {
+    await heartbeat({ state: 'running', step: 'P19-S04' },
+      opts(url, { settings: { url, token: 'sekret', name: LANE } }));
+    assert.strictEqual(bodies[0].user, LANE, 'non-solo reports the LANE, never git config user.name');
+    // ...and the solo chain below it is untouched: no name set still falls back exactly as D-042 says.
+    await heartbeat({ state: 'idle' }, opts(url));
+    assert.strictEqual(bodies[1].user, 'Tyler', 'solo still falls back to git config user.name (D-042)');
   } finally { server.close(); }
 });
 
@@ -251,8 +282,13 @@ test('reportUsage posts the §Account usage body, and elapsed ms — never a tim
 
 // The architectural rule of P10-S05, locked: the heartbeat rides extension.js's runner EVENTS, so
 // the runner's own step path gains no presence call and cannot be delayed by one (D-038).
+// P19-S04 narrowed the pattern from the bare word to the import and the call: the runner must now
+// NAME the planRunner.presenceName setting in a stop reason (D-087), and a rule that a file may not
+// mention a setting is not the rule D-038 locked. It cannot require the module, so it cannot call it.
 test('runner.js contains no presence call', () => {
-  assert.ok(!/presence/i.test(fs.readFileSync(require.resolve('../src/runner.js'), 'utf8')));
+  const src = fs.readFileSync(require.resolve('../src/runner.js'), 'utf8');
+  assert.ok(!/require\(['"][^'"]*presence/i.test(src), 'the runner may not import presence at all');
+  assert.ok(!/\bpresence\w*\s*\.\s*\w+\s*\(/i.test(src), 'nor call one through any other handle');
 });
 
 test('the display name follows the §Presence precedence and the timeout obeys the contract', () => {

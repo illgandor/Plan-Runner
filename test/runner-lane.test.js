@@ -77,6 +77,22 @@ test('laned pointer + a lane that is not in the file → refuses, never guesses 
   assert.equal(calls.start, 0);
 });
 
+// P19-S04 / D-087: the same refusal as above, but for the driver who has NOT set a name — the
+// state every project is in on the day it goes non-solo. Stopping is right; "not a master-plan
+// project" is not, and it names nothing the owner can act on (INV-7).
+test('laned pointer + no lane at all → ends naming planRunner.presenceName', (t) => {
+  const { calls, done } = run(tempProject('NEXT[tyler]: S1\nNEXT[reno]: S9'), t);
+  assert.equal(done && done.state, 'error');
+  assert.match(done.detail, /planRunner\.presenceName/, 'names the setting, not a symptom');
+  assert.equal(calls.start, 0, 'runs no step — it does not know whose step it would be');
+});
+
+test('an unlaned project with no pointer keeps today\'s reason, unchanged', (t) => {
+  const { done } = run(tempProject('(nothing here)'), t);
+  assert.match(done.detail, /not a master-plan project/);
+  assert.doesNotMatch(done.detail, /presenceName/, 'solo never hears about lanes');
+});
+
 // P17-S04: a lane told to WAIT rests visibly — an idle finish naming the step and the lane, not a
 // hang, not an error, and not a poll loop (research 06 §5.1–5.4).
 test('WAIT <step> → idles, naming the step and the lane', (t) => {
