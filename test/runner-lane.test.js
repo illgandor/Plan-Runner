@@ -77,6 +77,32 @@ test('laned pointer + a lane that is not in the file → refuses, never guesses 
   assert.equal(calls.start, 0);
 });
 
+// P17-S04: a lane told to WAIT rests visibly — an idle finish naming the step and the lane, not a
+// hang, not an error, and not a poll loop (research 06 §5.1–5.4).
+test('WAIT <step> → idles, naming the step and the lane', (t) => {
+  const { calls, done } = run(tempProject('NEXT[tyler]: WAIT P17-S01\nNEXT[reno]: P17-S01', 'tyler'), t);
+  assert.equal(done && done.state, 'idle', 'a wait is a rest, not an error and not "done"');
+  assert.match(done.detail, /P17-S01/, 'says WHAT it waits on');
+  assert.match(done.detail, /lane tyler/, 'says WHICH lane is waiting');
+  assert.equal(calls.start, 0, 'started nothing — never runs the other lane\'s step');
+});
+
+test('WAIT on an unlaned pointer → idles, with no empty lane clause', (t) => {
+  const { done } = run(tempProject('NEXT: WAIT P17-S01'), t);
+  assert.equal(done && done.state, 'idle');
+  assert.match(done.detail, /Waiting on P17-S01 —/, 'no "(lane )" when no lane is configured');
+});
+
+test('none is unchanged by the WAIT branch', (t) => {
+  assert.equal(run(tempProject('NEXT: none'), t).done.state, 'done');
+});
+
+test('PLAN COMPLETE is unchanged by the WAIT branch', (t) => {
+  const plan = run(tempProject('NEXT: PLAN COMPLETE'), t);
+  assert.equal(plan.calls.start, 1, 'still runs the master-plan session (once)');
+  assert.equal(plan.done.state, 'done', 'and the unchanged pointer still finishes "done", not idle');
+});
+
 test('all five readPointer call sites pass a lane', () => {
   const calls = [];
   for (const f of ['runner.js', 'extension.js']) {

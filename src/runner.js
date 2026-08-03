@@ -294,6 +294,13 @@ class Runner extends EventEmitter {
     const next = readPointer(this.project.path, this.project.lane);
     if (!next) return this._finish('error', 'No NEXT pointer / PROGRESS.md — not a master-plan project');
     if (/^none/i.test(next)) return this._finish('done', `Project complete (${next})`);
+    // Join wait / relay stop (research 06 §5.1–5.4): the wait is WRITTEN into the pointer, never
+    // derived — the runner has never parsed a plan file and must not start. One branch covers both
+    // shapes. It ENDS the run (§5.2): nothing here polls, sleeps or parks — the lane's existing idle
+    // heartbeat, outside this file, is what notices the wait clearing.
+    const wait = /^WAIT\s+(\S+)/i.exec(next);
+    if (wait) return this._finish('idle', `Waiting on ${wait[1]}`
+      + (this.project.lane ? ` (lane ${this.project.lane})` : '') + ' — no runnable step for this lane yet.');
     // Plan boundary: run master-plan ONCE to close/advance the plan (P02-S08), then re-read the
     // pointer. If master-plan already ran and the pointer is still PLAN COMPLETE (unchanged),
     // finish rather than loop. A pointer that names a step resets the guard (see _runStep).
