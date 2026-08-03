@@ -194,6 +194,43 @@ from PROGRESS.md or git history (owner supplies it — never invent a gate
 command); anything that would rewrite status the human may have set
 deliberately.
 
+## Joining late — a solo project gains a second driver
+
+Nothing in a solo project is written *wrong* for two drivers; it is written short.
+The migration is five doc edits, and it never touches a plan file.
+
+1. **Put both drivers on a new-enough build FIRST.** The runner must read
+   `readPointer(dir, lane)` and `plan_check.py` must accept the laned `NEXT_RE`;
+   the readers change BEFORE any laned pointer is written. This is the entire cost
+   of the migration — every other row below is free. The failure if one machine is
+   stale is benign: an un-upgraded reader gets `null` from a laned pointer and the
+   run ENDS with no runnable step. It never runs the other lane's step. Verify the
+   build on BOTH machines before step 3.
+2. **CONVENTIONS.md gains `## Shared-repo rules`** (templates.md has it), opening
+   with the mode-and-drivers line. Free — nothing machine-reads that file.
+3. **`NEXT:` becomes `NEXT[<lane>]:`, one line per driver.** The laned form
+   REPLACES the bare pointer; a bare line surviving beside a laned one is a FAIL.
+   The second lane opens at `WAIT <the live step id>` unless the plan is really split.
+4. **`## Session log` becomes `## Session log — <driver>`**, plus an empty section
+   for driver 2. Each driver prepends into and rotates only their own section; a
+   bare `## Session log` mixed with a per-driver one is a FAIL.
+5. **The board gains the roster line** under its heading (`Drivers: a · b — relay.`).
+   Free — a board row needs >4 pipe cells and a step id in cell 1, so prose is inert.
+
+**Plan files are untouched, and untouchable.** They are hash-locked, and a lane is
+not spec. **Archive shards stay shared** too — rotation is by session id across all
+drivers, because nothing reads the archive by driver.
+
+**Two lanes fit the ▶ NEXT STEP block; three do not.** Because the laned form
+replaces the bare line rather than annotating beside it, a typical block goes from
+4 of its 6 permitted lines to 5 and both `Note:` lines survive. A third lane costs
+a Note — and three drivers are out of scope anyway.
+
+**When to switch.** Relay any time, including mid-plan: it needs no split, so it is
+usable the moment the pointer form ships. Parallel waits for a plan boundary —
+re-laning a half-executed plan means proposing a split over steps whose `**Files:**`
+the finished work has already contradicted.
+
 ## §Adopt — migrating a legacy project
 
 For projects with pre-standard docs (BUILD_PLAN*.md + PROGRESS.md at CutClean
