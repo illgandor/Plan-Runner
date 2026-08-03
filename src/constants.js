@@ -46,8 +46,19 @@ const ALLOWED_TOOLS = [
 // updates it at close-out). This is the completion signal — not the SDK result alone.
 const POINTER_RE = /NEXT:\s*(.+)/;
 
+// The lane-qualified form `NEXT[<lane>]: <step>` (D-077). POINTER_RE above is unchanged and still
+// means the bare, solo pointer — which a laned line deliberately does NOT match, so an un-upgraded
+// reader refuses instead of running another lane's step (research 06 §3.1 F3).
+// LANE_POINTER_RE only detects that a file belongs to lanes at all.
+const LANE_POINTER_RE = /^NEXT\[[^\]]+\]:/m;
+
+// One lane's own pointer. The lane name is planRunner.presenceName (D-079) — user-supplied, so it
+// is escaped: a name with regex metacharacters must not alter the pattern.
+const lanePointerRe = (lane) =>
+  new RegExp('^NEXT\\[' + lane.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\]:\\s*(.+)', 'm');
+
 // Permission modes the loop accepts. No bypassPermissions ever (Plan Runner rule D-013).
 const ALLOWED_MODES = ['auto', 'acceptEdits', 'plan', 'manual'];
 const DEFAULT_MODE = 'auto';
 
-module.exports = { STEP_PROMPT, CODEX_STEP_SUFFIX, MASTER_PLAN_PROMPT, ALLOWED_TOOLS, POINTER_RE, ALLOWED_MODES, DEFAULT_MODE };
+module.exports = { STEP_PROMPT, CODEX_STEP_SUFFIX, MASTER_PLAN_PROMPT, ALLOWED_TOOLS, POINTER_RE, LANE_POINTER_RE, lanePointerRe, ALLOWED_MODES, DEFAULT_MODE };
