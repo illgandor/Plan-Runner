@@ -146,6 +146,13 @@ Follow `references/conversion-rules.md` exactly. The short version:
 - Discovery plan (offered and accepted at STEP 1.4): number it PLAN-00, one research doc per
   step under `planning/reference/research/`, last step writes `ROADMAP.md`. Same
   grammar as any plan. See `conversion-rules.md` §Discovery plan.
+- Parallel project (the STEP 1 mode question answered parallel): after
+  decomposition, derive the split with `plan_check.py --lanes PLAN-NN` and put it
+  to the owner verbatim, both refusals included — they end in a serial plan, never
+  in a question. The override is re-derivation with the named steps pinned; a
+  hand-edited roster is a defect. Solo, relay, and EVERY chained conversion emit
+  none of it (a chained plan starts serial). Wording: `conversion-rules.md`
+  §Lane proposal.
 - Public-facing website: P01-S01 is a password **preview gate** (full site built
   behind it; public sees a holding page). Opening it to the public is its own
   owner-gated launch step at the end. Details: `conversion-rules.md` §Website

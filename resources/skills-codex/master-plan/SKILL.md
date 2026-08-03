@@ -143,6 +143,13 @@ Follow `references/conversion-rules.md` exactly. The short version:
   ROADMAP scope draft in relay shape, and points `NEXT` at that plan's first step.
   See `conversion-rules.md` §Close-and-convert. The final plan on the roadmap has
   nothing to chain to and ends with the ordinary parking close.
+- Parallel project (the STEP 1 mode question answered parallel): after
+  decomposition, derive the split with `plan_check.py --lanes PLAN-NN` and put it
+  to the owner verbatim, both refusals included — they end in a serial plan, never
+  in a question. The override is re-derivation with the named steps pinned; a
+  hand-edited roster is a defect. Solo, relay, and EVERY chained conversion emit
+  none of it (a chained plan starts serial). Wording: `conversion-rules.md`
+  §Lane proposal.
 - Public-facing website: P01-S01 is a password **preview gate** (full site built
   behind it; public sees a holding page). Opening it to the public is its own
   owner-gated launch step at the end. Details: `conversion-rules.md` §Website

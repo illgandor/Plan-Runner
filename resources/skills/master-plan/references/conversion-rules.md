@@ -79,6 +79,55 @@ A **step** is the unit one fresh agent session executes end-to-end.
    `> CONVERTED (date) → planning/plans/PLAN-NN-<slug>.md — do not execute from
    this file.` (DMGoblin's orphaned root plan is the anti-pattern.)
 
+## Lane proposal — parallel projects only
+
+Emitted at STEP 2, after decomposition, in a **parallel** project only. Solo and
+relay emit none of it. Derivation proposes, the owner disposes — the wording has
+to make the override the cheap answer, not the brave one.
+
+Derive the split with `plan_check.py --lanes PLAN-NN` (it reads `[deps:]` and
+`**Files:**` alone), then put it to the owner verbatim:
+
+> Derived lanes for PLAN-05 — **a**: S02, S04, S06 (`src/**`) · **b**: S03, S05
+> (`presence-server/**`). They fork after S01 and rejoin at S07. 2 of 9 steps
+> pair off, saving 2 sessions. This is derived from `[deps:]` and `**Files:**`
+> alone, so it is *safe*, not necessarily *sensible* — it knows nothing about who
+> is better at what. Accept, or tell me which steps to move and I will re-derive
+> around them. **Serial is always a legal answer.**
+
+Both italicised sentences are load-bearing and must survive intact. Most derived
+forks are scheduling accidents rather than skill boundaries — they pair steps at
+opposite ends of a plan's narrative — and a proposal that does not say so invites
+the owner to assume the tool had a reason it does not have. "Serial is always a
+legal answer" is the sentence that makes the override cheap rather than brave.
+
+**The override is re-derivation, never hand-editing.** The owner names steps to
+move; re-run `--lanes` with those steps pinned and re-test disjointness.
+Hand-editing a roster is a defect, not a shortcut: it lets an overlapping split
+into the docs, which the checker's F-a rule then FAILs at close-out — after the
+work is done.
+
+**Two refusals, and both end in a serial plan rather than a question.** A
+conversion may pause for the owner, but the wording must default cleanly when
+nobody is there — the owner runs this overnight. Nothing to split:
+
+> No lane split for PLAN-11 — every step depends on the one before it. It runs
+> serial; the baton and the claim still work, so both of you can pick it up.
+
+A footprint that cannot be proven disjoint — refuse and name it, never ask:
+
+> I can't lane PLAN-06: S07's `**Files:**` reads `src/session.js if needed`,
+> which I can't prove disjoint from S06's. Tighten that field or run the plan
+> serial.
+
+An accepted split is written to the board's roster line and nowhere else.
+
+**A chained conversion emits none of this, whatever the mode.** It converts the
+incoming plan in relay shape — one lane holds S01, every other lane is written
+`WAIT <that step ID>` (§Close-and-convert). An unattended step cannot hold the
+conversation this proposal opens; the owner re-lanes at a boundary they attend,
+or on request.
+
 ## Discovery plan — PLAN-00 (research and planning as a plan)
 
 Some asks are too big to convert in one sitting: the owner describes a whole
