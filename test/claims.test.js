@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { take, release, holder, claimRef, EMPTY_TREE } = require('../src/claims');
+const { take, reclaim, release, holder, claimRef, EMPTY_TREE } = require('../src/claims');
 
 // A fake git: records every argv, and answers per-subcommand. `push` answers throw like
 // execFileSync does — non-zero exit, message on stderr.
@@ -38,6 +38,23 @@ test('a free step is taken: unique parentless commit over the empty tree, pushed
     'empty lease = the ref must not exist (E8b)');
   assert.strictEqual(push.opts.env.GIT_TERMINAL_PROMPT, '0', 'an unattended run never blocks on a prompt');
   assert.ok(push.opts.timeout > 0, 'the timeout is caller-imposed — http.connectTimeout does not bound it (E13b)');
+});
+
+// P18-S03, §4.3: the self-reclaim differs from a take in exactly one character — the lease. It is a
+// FRESH commit under a lease on the sha just observed, so a claim that changed hands since that read
+// is refused (`held`) instead of overwritten. Never the bare `--force` of §4.4.
+test('a self-reclaim leases the ref on the sha just observed', () => {
+  const { exec, calls } = fakeGit({ 'commit-tree': 'newsha\n', push: '' });
+  const r = reclaim('/repo', { step: 'P18-S01', driver: 'tyler', host: 'tylerdesktop' }, 'fee003a', OPTS(exec));
+  assert.strictEqual(r.verdict, 'taken');
+  assert.deepStrictEqual(calls[1].args,
+    ['push', '--force-with-lease=refs/claims/P18-S01:fee003a', 'origin', 'newsha:refs/claims/P18-S01']);
+  assert.match(calls[0].opts.input, /^claim P18-S01\n/, 'a fresh payload, so the reclaim is its own object');
+});
+
+test('a self-reclaim whose lease is stale is `held`, never a steal', () => {
+  const { exec } = fakeGit({ 'commit-tree': 'newsha', push: rejection(' ! [rejected] (stale info)\n') });
+  assert.strictEqual(reclaim('/repo', { step: 'P18-S01' }, 'fee003a', OPTS(exec)).verdict, 'held');
 });
 
 // §2.4. The parenthetical varies with local ref state, git version and host; the marker does not.

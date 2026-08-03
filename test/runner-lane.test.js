@@ -106,10 +106,12 @@ test('PLAN COMPLETE is unchanged by the WAIT branch', (t) => {
 // ---- P18-S02: taken after the gate, released after the handoff guard (D-083/D-084) ----
 // Its own harness: these need the pointer to actually ADVANCE (so the run reaches _advance) and a
 // single log ordered across claims and the session. `to: null` leaves the pointer alone.
+// P18-S03 extends it with the holder read and the reclaim, both logged in the same order.
 function claimHarness(p, t, { verdict = 'taken', git = { clean: true, pushed: true, behind: false },
-  to = 'none' } = {}) {
+  to = 'none', holder = null, reclaimVerdict = 'taken' } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setImmediate'] });
-  const log = [], takes = [], releases = [];
+  const log = [], takes = [], releases = [], reclaims = [], statuses = [];
+  const out = { done: null };
   const orig = {};
   for (const k of ['start', 'stop', 'interrupt', 'currentSessionId', 'defaultSend']) orig[k] = session[k];
   session.defaultSend = () => {};
@@ -129,9 +131,16 @@ function claimHarness(p, t, { verdict = 'taken', git = { clean: true, pushed: tr
   r.claims = {
     take: (cwd, payload) => { log.push('take'); takes.push(payload); return { verdict, ref: 'r', sha: 's', detail: '' }; },
     release: (cwd, step) => { log.push('release'); releases.push(step); return { released: true, ref: 'r' }; },
-    holder: () => null,
+    holder: () => { log.push('holder'); return holder; },
+    reclaim: (cwd, payload, sha) => {
+      log.push('reclaim'); reclaims.push({ ...payload, sha });
+      return { verdict: reclaimVerdict, ref: 'r', sha: 's2', detail: '' };
+    },
   };
-  return { r, log, takes, releases, restore: () => { for (const k of Object.keys(orig)) session[k] = orig[k]; } };
+  r.on('done', (d) => { out.done = d; });
+  r.on('status', (s) => statuses.push(s));
+  return { r, log, takes, releases, reclaims, statuses, out,
+    restore: () => { for (const k of Object.keys(orig)) session[k] = orig[k]; } };
 }
 
 test('a laned step is claimed AFTER the gate and BEFORE the session starts', (t) => {
@@ -232,6 +241,76 @@ test('a resume does not re-claim', (t) => {
     t.mock.timers.tick(0);
     h.r._resume();
     assert.equal(h.takes.length, 1, 'resume re-enters the SAME step\'s session — the claim is still ours');
+  } finally { h.restore(); }
+});
+
+// ---- P18-S03: the three refusals (research 03 §4.3/§4.4/§6, 06 §2.3) ----
+const OTHER = { step: 'P18-S03', ref: 'r', sha: 'abc1234', driver: 'reno', host: 'renobox',
+  ts: '2026-08-03T09:00:00Z' };
+const MINE = (ts) => ({ ...OTHER, driver: 'tyler', host: os.hostname(), sha: 'dead5ee', ts });
+
+test('a claim held by the OTHER driver ends idle, naming holder, host and ts', (t) => {
+  const p = tempProject('NEXT: P18-S03', 'tyler');
+  const h = claimHarness(p, t, { verdict: 'held', holder: OTHER });
+  try {
+    h.r.start();
+    t.mock.timers.tick(0);
+    assert.equal(h.out.done && h.out.done.state, 'idle', 'a taken step is a rest, not an error');
+    assert.match(h.out.done.detail, /reno/, 'names the holder');
+    assert.match(h.out.done.detail, /renobox/, 'names the host');
+    assert.match(h.out.done.detail, /2026-08-03T09:00:00Z/, 'names when — for the human, not for a branch');
+    assert.deepEqual(h.log, ['take', 'holder'], 'never retried, never waited, never broke it, never ran');
+  } finally { h.restore(); }
+});
+
+test('my own dead run\'s claim is reclaimed silently, leased on the sha just observed', (t) => {
+  const p = tempProject('NEXT: P18-S03', 'tyler');
+  const h = claimHarness(p, t, { verdict: 'held', holder: MINE('2026-08-03T09:00:00Z') });
+  try {
+    h.r.start();
+    t.mock.timers.tick(0);
+    assert.deepEqual(h.log, ['take', 'holder', 'reclaim', 'session', 'release'],
+      'same driver + same host = no ambiguity to resolve, so no human and no refusal');
+    assert.equal(h.reclaims[0].sha, 'dead5ee', 'the lease is the sha THIS read saw, so a racer still wins');
+    assert.equal(h.reclaims[0].driver, 'tyler');
+    assert.ok(h.statuses.every((s) => !/unclaimed/.test(s.detail || '')), 'silent beyond the run log');
+  } finally { h.restore(); }
+});
+
+test('an ancient claim of my own is still reclaimed — no TTL, and no branch reads ts', (t) => {
+  const p = tempProject('NEXT: P18-S03', 'tyler');
+  const h = claimHarness(p, t, { verdict: 'held', holder: MINE('1970-01-01T00:00:00Z') });
+  try {
+    h.r.start();
+    t.mock.timers.tick(0);
+    assert.deepEqual(h.log, ['take', 'holder', 'reclaim', 'session', 'release'],
+      'a 56-year-old claim and a 5-second-old one take the same path (§4.2)');
+  } finally { h.restore(); }
+});
+
+test('a reclaim that loses its lease refuses, naming whoever holds it NOW', (t) => {
+  const p = tempProject('NEXT: P18-S03', 'tyler');
+  const h = claimHarness(p, t, { verdict: 'held', reclaimVerdict: 'held' });
+  try {
+    // Mine on the first read, theirs on the second — the race the lease exists to lose safely.
+    h.r.claims.holder = (() => { let n = 0; return () => (n++ ? OTHER : MINE('2026-08-03T09:00:00Z')); })();
+    h.r.start();
+    t.mock.timers.tick(0);
+    assert.equal(h.out.done.state, 'idle');
+    assert.match(h.out.done.detail, /reno/, 'it changed hands between the read and the push — never stolen');
+  } finally { h.restore(); }
+});
+
+test('a markerless failure runs the step UNCLAIMED and says so', (t) => {
+  const p = tempProject('NEXT: P18-S03', 'tyler');
+  const h = claimHarness(p, t, { verdict: 'unreachable' });
+  try {
+    h.r.start();
+    t.mock.timers.tick(0);
+    assert.deepEqual(h.log, ['take', 'session'], 'infrastructure is not contention — it proceeds');
+    assert.ok(h.statuses.some((s) => /unclaimed/.test(s.detail || '')),
+      'silence is the one unacceptable answer (INV-7)');
+    assert.deepEqual(h.releases, [], 'it never held one, so it has nothing to give back');
   } finally { h.restore(); }
 });
 

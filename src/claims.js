@@ -37,10 +37,11 @@ function gitIn(cwd, exec, timeout) {
 // execFileSync throws on non-zero; git push reports the rejection on stderr.
 const output = (e) => `${(e && e.stderr) || ''}${(e && e.stdout) || ''}` || String((e && e.message) || e);
 
-// take → exactly one of 'taken' | 'held' | 'unreachable'. The CAS push IS the read: a clean exit
-// means the step was free, so the happy path costs one round trip and never calls holder() (06 §2.2,
-// which measured 422.4 ms saved per successful start).
-function take(cwd, { step, driver, host, ts } = {},
+// One compare-and-swap: build the claim commit, then push it under a LEASE. The lease is the whole
+// mechanism — `''` means "the ref must not exist" (a take), a sha means "the ref is still exactly
+// this" (a self-reclaim, P18-S03). Both are `--force-with-lease`; an unleased overwrite is banned
+// outright (§4.4), so this is the only place a claim ref is ever written.
+function cas(cwd, { step, driver, host, ts } = {}, lease = '',
   { exec = execFileSync, timeout = CLAIM_TIMEOUT_MS, now = () => new Date().toISOString() } = {}) {
   const ref = claimRef(step);
   const git = gitIn(cwd, exec, timeout);
@@ -52,17 +53,29 @@ function take(cwd, { step, driver, host, ts } = {},
     return { verdict: 'unreachable', ref, sha: null, detail: output(e) };
   }
   try {
-    // `--force-with-lease=<ref>:` — an EMPTY expectation, i.e. "the ref must not exist". It refuses
-    // even when the local ref is stale, and succeeds on a free step (E8b). Belt-and-braces over the
+    // `--force-with-lease=<ref>:<lease>`. Empty lease = "the ref must not exist": it refuses even
+    // when the local ref is stale, and succeeds on a free step (E8b). Belt-and-braces over the
     // unique-value rule, never a substitute for it. An UNLEASED overwrite is banned outright (§4.4): the
     // remote does not protect a claim ref, so the mechanism's integrity rests on never issuing one.
-    git(['push', `--force-with-lease=${ref}:`, 'origin', `${sha}:${ref}`]);
+    git(['push', `--force-with-lease=${ref}:${lease}`, 'origin', `${sha}:${ref}`]);
     return { verdict: 'taken', ref, sha, detail: '' };
   } catch (e) {
     const detail = output(e);
     return { verdict: REJECTED.test(detail) ? 'held' : 'unreachable', ref, sha, detail };
   }
 }
+
+// take → exactly one of 'taken' | 'held' | 'unreachable'. The CAS push IS the read: a clean exit
+// means the step was free, so the happy path costs one round trip and never calls holder() (06 §2.2,
+// which measured 422.4 ms saved per successful start).
+const take = (cwd, payload, opts) => cas(cwd, payload, '', opts);
+
+// Self-reclaim (§4.3, P18-S03): the SAME driver on the SAME host meeting its own claim — a run that
+// died mid-step. Automatic and silent, because there is no ambiguity for a human to resolve and no
+// TTL to guess. Leased on the sha JUST OBSERVED, so it stays atomic against a racing writer: a claim
+// that genuinely changed hands between the read and this push is REFUSED (`held`), never stolen.
+// The other driver's claim can only ever be taken by the human break command (§4.4).
+const reclaim = (cwd, payload, sha, opts) => cas(cwd, payload, String(sha || ''), opts);
 
 // Release is a plain ref delete (§2.6). A failed delete is NOT fatal — it degrades to the stale
 // claim of §4.3, which the holder reclaims automatically on its next run.
@@ -104,4 +117,4 @@ function holder(cwd, step, { exec = execFileSync, timeout = CLAIM_TIMEOUT_MS } =
   return { step, ref, sha, ...parsePayload(body) };
 }
 
-module.exports = { take, release, holder, claimRef, EMPTY_TREE, CLAIM_TIMEOUT_MS };
+module.exports = { take, reclaim, release, holder, claimRef, EMPTY_TREE, CLAIM_TIMEOUT_MS };

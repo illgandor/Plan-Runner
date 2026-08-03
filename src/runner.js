@@ -119,6 +119,16 @@ function stopTimeReached(startedAtMs, nowMs, hhmm) {
   return nowMs >= target;
 }
 
+// How a claim held by the OTHER driver is refused (P18-S03, research 06 §2.3). `ts` appears here and
+// NOWHERE else: it is informational only — it tells the human deciding whether to break the claim how
+// old it is, and no branch anywhere reads it (§4.3). A holder whose payload could not be read is
+// still refused, and still says so: the ref exists, so somebody is on the step (INV-7).
+function claimRefusal(step, h) {
+  const who = (h && h.driver) || 'another driver';
+  const since = [h && h.host, h && h.ts].filter(Boolean).join(', ');
+  return `${step} is claimed by ${who}${since ? ` (${since})` : ''}. Not starting.`;
+}
+
 const MAX_STEPS = 200; // hard safety cap per ON run
 // P05-S05: an error turn-end tears down the session (session.js deletes it), so it's not the
 // same "Claude is waiting on you" as a clean result that didn't advance the pointer. A transient
@@ -325,9 +335,21 @@ class Runner extends EventEmitter {
     // Claim the step at the moment work actually starts — after the gate, never before it (D-083).
     // A usage hold can last days, and claiming first would hold a step nobody is working on;
     // onUsageUpdate re-enters here from the top, so the claim is taken when the hold clears and the
-    // freshness guard above is re-run for free. S03 branches on the verdict; today every verdict
-    // still runs the step.
-    this._takeClaim(next);
+    // freshness guard above is re-run for free.
+    const claim = this._takeClaim(next);
+    // The three refusals (P18-S03; research 03 §4.3/§4.4/§6, 06 §2.3). Self-reclaim is the third and
+    // has already happened inside _takeClaim, silently and by design — so only two reach here.
+    //
+    // Held by the OTHER driver: end idle, naming who and since when. Never retry, never wait, never
+    // break — a break is a deliberate, attributed HUMAN act (§4.4/S04), and this loop is the
+    // unattended one. Its worst case is lost parallelism until a person looks (INV-10).
+    if (claim && claim.verdict === 'held') return this._finish('idle', claimRefusal(next, claim.holder));
+    // Exit ≠ 0 with no `[rejected]` marker is infrastructure, not contention (offline, auth, no
+    // origin, timeout): proceed UNCLAIMED, exactly as the freshness guard above already fails open —
+    // but SAY SO. Silence is the one unacceptable answer (INV-7).
+    if (claim && claim.verdict === 'unreachable')
+      this.emit('status', { state: 'running', step: next,
+        detail: `Could not reach the remote to claim ${next} — running unclaimed.` });
     this._runStep(next);
   }
 
@@ -337,8 +359,22 @@ class Runner extends EventEmitter {
   _takeClaim(stepId) {
     this._claim = null;
     if (!this.project.lane) return null;
-    this._claim = { step: stepId, ...this.claims.take(this.project.path,
-      { step: stepId, driver: this.project.lane, host: os.hostname() }) };
+    const me = { step: stepId, driver: this.project.lane, host: os.hostname() };
+    let res = this.claims.take(this.project.path, me);
+    if (res.verdict === 'held') {
+      // Only a rejection makes a read worth its 422 ms — and WHO holds it is what splits the stale
+      // case in two (§4.3). Same driver AND same host = our own dead run, so reclaim it: automatic,
+      // no wait, no ceremony, leased on the sha just observed. Anything else is the other driver's.
+      let h = this.claims.holder(this.project.path, stepId);
+      if (h && h.driver === me.driver && h.host === me.host) {
+        res = this.claims.reclaim(this.project.path, me, h.sha);
+        // A lost lease means it really did change hands since that read — re-read, so the refusal
+        // names whoever holds it now instead of naming us.
+        h = res.verdict === 'held' ? this.claims.holder(this.project.path, stepId) : null;
+      }
+      res = { ...res, holder: h };
+    }
+    this._claim = { step: stepId, ...res };
     return this._claim;
   }
 
