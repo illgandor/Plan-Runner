@@ -225,10 +225,12 @@ def check_progress(root: Path):
 
     # Session log
     s, e = section(lines, "Session log")
+    session_ids = set()
     if s == -1:
         add("FAIL", "Session log section", "missing")
     else:
         entries = [i for i in range(s, e) if SESSION_HEAD_RE.match(lines[i])]
+        session_ids = {SESSION_HEAD_RE.match(lines[i]).group(1) for i in entries}
         if len(entries) > SESSION_ENTRIES_MAX:
             add("FAIL", f"Session log <= {SESSION_ENTRIES_MAX} hot entries",
                 f"{len(entries)} — rotate oldest to planning/archive/SESSIONS-*.md")
@@ -258,6 +260,7 @@ def check_progress(root: Path):
 
     # Board ↔ plan parity
     active_nn = None
+    board_rows = []  # (step id, status glyph, Done cell) — derived state reads these
     for i, ln in enumerate(lines):
         m = re.match(r"^## Board — PLAN-(\d{2}) \(active\)", ln)
         if m:
@@ -268,6 +271,8 @@ def check_progress(root: Path):
                 cells = [c.strip() for c in row.split("|")]
                 if len(cells) > 4 and STEP_ID_RE.fullmatch(cells[1]):
                     board_ids.append(cells[1])
+                    board_rows.append((cells[1], cells[4],
+                                       cells[5] if len(cells) > 5 else ""))
                     if cells[4] not in STATUS_GLYPHS:
                         bad_cells.append(f"{cells[1]}='{cells[4]}'")
             if bad_cells:
@@ -293,6 +298,58 @@ def check_progress(root: Path):
                     f"{next_id} vs active PLAN-{active_nn}")
     if active_nn is None and next_id is not None:
         add("WARN", "active board present", "NEXT names a step but no active board found")
+
+    # Derived state — the board, the Dashboard count and the session log must
+    # agree. Every number here is hand-maintained and drifts silently: five ✅
+    # rows against a "4/10" count passed green before this. These are FAILs
+    # (unlike the Updated: sha, which goes stale for innocent reasons) because a
+    # wrong count is never innocent. Input is PROGRESS.md alone — the checker
+    # still opens no source file (D-068).
+    ds, de = section(lines, "Dashboard")
+    if ds != -1:
+        dash = {}
+        for row in lines[ds:de]:
+            cells = [c.strip() for c in row.split("|")]
+            if len(cells) > 4 and re.fullmatch(r"PLAN-\d{2}", cells[1]):
+                # leading N/M only — a trailing annotation ("41/45 (2 parked)")
+                # is legitimate and still perfectly readable
+                fr = re.match(r"(\d+)\s*/\s*(\d+)", cells[4])
+                if fr:
+                    dash[cells[1]] = (int(fr.group(1)), int(fr.group(2)))
+                else:
+                    add("FAIL", f"{cells[1]} Dashboard Done starts with N/M",
+                        f"'{cells[4][:30]}' — the count must be machine-readable")
+        tm = re.search(r"\*\*All plans: (\d+)/(\d+)", "\n".join(lines[ds:de]))
+        if tm and dash:
+            want = (sum(d for d, _ in dash.values()), sum(t for _, t in dash.values()))
+            if (int(tm.group(1)), int(tm.group(2))) != want:
+                add("FAIL", "Dashboard total == sum of its rows",
+                    f"says {tm.group(1)}/{tm.group(2)}, the {len(dash)} rows sum to"
+                    f" {want[0]}/{want[1]}")
+        pid = f"PLAN-{active_nn}" if active_nn else None
+        if board_rows and pid in dash:
+            # ❌ rows are DROPPED steps — out of the plan, so out of both halves
+            # of the fraction. A ⏸️ row is still a step, just not a done one.
+            live = [r for r in board_rows if "❌" not in r[1]]
+            done = sum(1 for _, g, _ in live if "✅" in g)
+            if dash[pid] != (done, len(live)):
+                add("FAIL", f"{pid} Dashboard Done == its board",
+                    f"row says {dash[pid][0]}/{dash[pid][1]}, board has {done} ✅"
+                    f" of {len(live)} rows (❌ dropped rows excluded)")
+
+    # A row flipped to ✅ must be evidenced by a session entry naming the same
+    # session. Only the live window is checkable: entries older than the oldest
+    # hot one are rotated to planning/archive/, so a Done cell naming a session
+    # at or before that is accepted, never guessed at.
+    if board_rows and session_ids:
+        oldest = min(session_ids)
+        for sid, glyph, done_cell in board_rows:
+            sm = re.search(r"S\d{4}", done_cell)
+            if "✅" in glyph and sm and sm.group() > oldest \
+                    and sm.group() not in session_ids:
+                add("FAIL", "board ✅ row has its session entry",
+                    f"{sid} is done in {sm.group()} but the log has no {sm.group()}"
+                    " entry — the board claims work the log cannot evidence")
 
     # Facts / Decisions / Amendments / Blockers
     s, e = section(lines, "Facts future sessions need")
