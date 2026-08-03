@@ -65,6 +65,27 @@ State the detected mode before acting. All modes end with STEP 4.
    block of CONVENTIONS.md (`references/templates.md` §6). It changes no step
    spec — it sets the close-out discipline that keeps two drivers from
    colliding. One person → say so in Facts; the section is omitted.
+5. **Ask: should each plan hand off to the next one by itself?** (INIT, after the
+   roadmap scope is known.) **Ask only when something is queued after this plan** —
+   no ROADMAP, no plan named after this one, or a one-plan project all mean there is
+   nothing to chain to, and a project with nothing following must not be prompted.
+   Never retro-fit it on ADOPT: a LOCKED plan is never edited, so the chaining step
+   lands in the next plan authored. Verbatim:
+
+   > Should each plan hand off to the next one by itself? The last step of every plan
+   > would close that plan — auditing each step against the repo — then convert the
+   > next scope draft from your ROADMAP into a locked plan and point at its first
+   > step, so an unattended run never stops at a plan boundary. It stops for the
+   > things that need you: any decision the draft leaves genuinely open blocks its own
+   > steps and lands in OWNER_TODO. **Yes** is the answer if your ROADMAP names more
+   > than one plan; say no and each boundary waits for you instead.
+
+   Yes → record it as a Locked decision, author the close-and-convert final step
+   (`references/conversion-rules.md` §Close-and-convert), and include the
+   §Plan close and chaining block of CONVENTIONS.md (`references/templates.md` §6).
+   No → omit that block and nothing else changes. Nothing machine-readable stores the
+   answer: the presence of the step IS the declaration, and a project that changes its
+   mind edits the next plan it authors.
 
 ## STEP 2 — Decompose (INIT and NEW-PLAN)
 
@@ -81,6 +102,11 @@ Follow `references/conversion-rules.md` exactly. The short version:
   **before** writing the steps that depend on them.
 - Owner-only work: pre-split into `a` (agent) / `b` (owner-gated) steps or
   route to OWNER_TODO — never a DoD box an agent can't check.
+- Chained project (the STEP 1 chaining question answered yes): the plan's LAST step
+  is the close-and-convert chaining step — it closes this plan, converts the next
+  ROADMAP scope draft in relay shape, and points `NEXT` at that plan's first step.
+  See `conversion-rules.md` §Close-and-convert. The final plan on the roadmap has
+  nothing to chain to and ends with the ordinary parking close.
 - Public-facing website: P01-S01 is a password **preview gate** (full site built
   behind it; public sees a holding page). Opening it to the public is its own
   owner-gated launch step at the end. Details: `conversion-rules.md` §Website

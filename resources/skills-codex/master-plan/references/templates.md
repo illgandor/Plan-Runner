@@ -369,6 +369,25 @@ The build session sets `NEXT: PLAN COMPLETE — run the master-plan skill` plus
 an OWNER_TODO item; the closeout ritual is run by the master-plan skill, never
 the build session.
 
+## Plan close and chaining  {{INCLUDE ONLY IF the project opted into chaining — the STEP 1 chaining question}}
+This project's plans close themselves. The LAST step of each plan is a
+close-and-convert step, so the section above applies only to the final plan on
+the roadmap. The chaining step closes its own plan (auditing every step against
+the repo), converts the next scope draft from planning/reference/ROADMAP.md into
+a locked plan, activates it, and sets `NEXT:` to that plan's first step ID —
+`NEXT` always names a real step and never parks, so an unattended run stops at
+zero plan boundaries.
+- **Relay shape always.** A chained conversion puts S01 on one lane and every
+  other lane on `WAIT <that step ID>`. Re-laning ends in an owner conversation an
+  unattended step cannot hold — ask for it at a boundary you attend.
+- **An open decision halts the chain.** The converting step never rules on what
+  the draft leaves undecided: the question goes to the new plan's §8, each
+  dependent step block gets `**Context:** BLOCKED by §8 OD-n`, and OWNER_TODO
+  gets an item.
+- **A red gate halts it.** Never hand off red, never close a plan over one.
+- **An owner-gated row does NOT halt it** — it becomes OWNER_TODO debt and the
+  build continues past it.
+
 ## Amendment procedure (spec is wrong or must change)
 Append to PROGRESS.md ## Amendments: `- A-P<NN>-<##> (<date>, affects <step ids>):
 <what/why in <=3 lines>. Plan unchanged.` Deep rationale goes in the commit body.

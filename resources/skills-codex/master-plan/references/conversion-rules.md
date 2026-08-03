@@ -117,6 +117,44 @@ Run when every board row is ✅/❌-with-amendment and the plan's mission holds:
    `NEXT: none — no active plan (run master-plan with a new draft)`.
 5. Run `plan_check.py` to exit 0. Commit as `PLAN-NN: closed`.
 
+### Close-and-convert — the chaining variant (opt-in, chosen at INIT)
+
+If the project answered yes to the STEP 1 chaining question, its plans' **last step
+is the chaining step**: it runs the ritual above itself and then keeps going —
+
+6. Convert the next scope draft from `planning/reference/ROADMAP.md` into a locked
+   plan file, activate it (Dashboard row 🔵 ACTIVE, board all-⬜), and set `NEXT:`
+   to that plan's first step ID.
+
+`NEXT` therefore always names a real step and never parks, so an unattended run
+stops at **zero** plan boundaries instead of one per boundary.
+
+**A chained conversion always converts the incoming plan in relay shape** — one lane
+holds S01, every other lane is written `WAIT <that step ID>`. Deriving lanes ends in
+an owner conversation, and an unattended step cannot hold one; the owner re-lanes at
+a boundary they attend, or on request. Chaining and parallel compose, but a chained
+plan starts serial.
+
+**Two brakes, both load-bearing — they are why this is safe to run unattended:**
+- **An open decision halts the chain.** A converting step may not rule on anything
+  its scope draft leaves genuinely undecided: the question goes into the new plan's
+  §8 Open decisions, each dependent step block gets its own
+  `**Context:** BLOCKED by §8 OD-n` line (that line is the brake — §8 alone is only
+  the register), and OWNER_TODO gets an item.
+- **A red gate halts it.** Never hand off red, never close a plan over one.
+- **An owner-gated row deliberately does NOT halt it** — it becomes OWNER_TODO debt
+  and the build continues past it, rather than deadlocking on a person who is not at
+  the keyboard.
+
+**Depends on the checker's DRAFT-active rule.** A chaining step authors a plan file
+and locks it inside one unattended step; without a checker that FAILs on an active
+plan still marked `status: DRAFT`, a boundary that half-converted passes green and
+immutability is silently off at exactly the moment nobody is watching. Do not offer
+chaining to a project whose `planning/tools/plan_check.py` predates that rule.
+
+The **last plan on the roadmap has nothing to chain to**: its final step runs the
+plain ritual above and parks with `NEXT: PLAN COMPLETE — run the master-plan skill`.
+
 ## Plan-park procedure (owner ruling required)
 
 To set aside an INCOMPLETE plan (e.g. the owner wants a new plan active now):
