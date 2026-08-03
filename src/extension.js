@@ -150,6 +150,9 @@ function project() {
   const dir = workspaceDir();
   if (!dir) return null;
   return { id: dir, path: dir, name: path.basename(dir), engine: state.engine, model: effectiveModel(), effort: effectiveEffort(), mode: state.mode,
+    // The lane IS presenceName (D-079) — one identity across lane, claim and presence, so there is
+    // no planRunner.laneName to keep in sync. Unset → '' → readPointer's bare, unlaned behaviour.
+    lane: vscode.workspace.getConfiguration('planRunner').get('presenceName', ''),
     maxTurns: vscode.workspace.getConfiguration('planRunner').get('maxTurns', 0),
     maxStepsPerRun: vscode.workspace.getConfiguration('planRunner').get('maxStepsPerRun', 0),
     stopAtTime: vscode.workspace.getConfiguration('planRunner').get('stopAtTime', '') };
@@ -292,7 +295,7 @@ async function onMessage(m) {
       notifyIfAutoReviewGated(); // panel opened already on an auto-review-incapable Codex
       if (usage) postUsage(usage.snapshot()); // paint whatever's been read so far
       if (skillNote) post({ kind: 'info', text: skillNote });
-      post({ kind: 'splash', text: p ? `Workspace: ${p.name}${planFrac(p.path)} — NEXT: ${readPointer(p.path) || '(none)'}` : 'Open a master-plan project folder to begin.' });
+      post({ kind: 'splash', text: p ? `Workspace: ${p.name}${planFrac(p.path)} — NEXT: ${readPointer(p.path, p.lane) || '(none)'}` : 'Open a master-plan project folder to begin.' });
       break;
     case 'start': {
       if (!p) { const msg = 'Open a project folder first.'; post({ kind: 'info', text: msg }); vscode.window.showWarningMessage(msg); break; }
@@ -305,7 +308,7 @@ async function onMessage(m) {
         if (pick !== 'Turn On & Start') { post({ kind: 'info', text: 'Toggle Plan Runner On (status bar, bottom-left) to start.' }); break; }
         setEnabled(true);
       }
-      post({ kind: 'info', text: `Starting — NEXT: ${readPointer(p.path)}` });
+      post({ kind: 'info', text: `Starting — NEXT: ${readPointer(p.path, p.lane)}` });
       ensureRunner()?.start();
       break;
     }

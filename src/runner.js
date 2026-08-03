@@ -291,7 +291,7 @@ class Runner extends EventEmitter {
           : 'This branch has also diverged (it has local commits that are not pushed), so '
             + '`git pull --ff-only` cannot succeed — rebase or merge them yourself, then Start again.'));
     }
-    const next = readPointer(this.project.path);
+    const next = readPointer(this.project.path, this.project.lane);
     if (!next) return this._finish('error', 'No NEXT pointer / PROGRESS.md — not a master-plan project');
     if (/^none/i.test(next)) return this._finish('done', `Project complete (${next})`);
     // Plan boundary: run master-plan ONCE to close/advance the plan (P02-S08), then re-read the
@@ -421,7 +421,7 @@ class Runner extends EventEmitter {
       }
       return setImmediate(() => this._runNext());
     }
-    const after = readPointer(this.project.path);
+    const after = readPointer(this.project.path, this.project.lane);
     if (after && after !== stepId) { // pointer advanced = the step's work is done
       this._recordStep(stepId);
       return this._beginFinalize(stepId, gen); // settle, then advance
@@ -526,7 +526,7 @@ class Runner extends EventEmitter {
       return;
     }
     this.stepsRun++;
-    const after = readPointer(this.project.path);
+    const after = readPointer(this.project.path, this.project.lane);
     this._provider.stop(this.id); // teardown -> guarantees a fresh context next step
     this.emit('step-done', { from: stepId, to: after });
     if (this.stopRequested) return this._finish('idle', `Stopped after ${stepId}`);
