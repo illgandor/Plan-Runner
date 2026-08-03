@@ -150,10 +150,16 @@ const str = (v, min = 1) => typeof v === 'string' && v.length >= min && v.length
 // client that sends the new values to a server from before it gets a 400 and vanishes from the
 // dashboard, which is why the server is deployed first.
 const STATES = new Set(['running', 'waiting', 'paused', 'idle']);
+// P20-S01 (D-089): the multi-driver delta rides OPTIONAL FIELDS, never a new `state` value — an
+// unknown state is a 400, and one lost beat is 300s of the 900s expiry budget, so the driver would
+// vanish from the dashboard mid-run. `lane` and `claim` validate on exactly `step`'s shape, and are
+// bounded HERE rather than left unknown-and-unbounded: from the moment a field is stored it reaches
+// the live map and the dashboard by `step`'s path, so it needs `step`'s ceiling.
+const opt = (v) => v === null || v === undefined || str(v, 0);
 function valid(b) {
   return !!b && typeof b === 'object'
     && str(b.project) && str(b.user)
-    && (b.step === null || b.step === undefined || str(b.step, 0))
+    && opt(b.step) && opt(b.lane) && opt(b.claim)
     && STATES.has(b.state);
 }
 
@@ -230,10 +236,19 @@ function createServer({
         if (!users) projects.set(body.project, (users = new Map()));
         // The server timestamps authoritatively; the client's advisory `ts` is discarded.
         const ts = now();
-        users.set(body.user, { user: body.user, step: body.step ?? null, state: body.state, ts });
+        const rec = { user: body.user, step: body.step ?? null, state: body.state, ts };
+        // Written into the LIVE record beside `step` so livePeers() mirrors them into both read
+        // routes with no second code path and no second store. Absent stays ABSENT (D-090): a
+        // `lane: null` key would read as "no lane" where the truth is "this client never said".
+        if (body.lane != null) rec.lane = body.lane;
+        if (body.claim != null) rec.claim = body.claim;
+        users.set(body.user, rec);
 
         // HISTORY: lastSeen tracks any beat; lastRunning and `step` only advance on a RUNNING one,
         // so a row reads "last working on P11-S02", not whatever idle beat happened to land last.
+        // Deliberately NOT extended with lane/claim (P20-S01): history answers "last working on",
+        // while a claim is a live fact that expires with the beat — a persisted copy would outlive
+        // the thing it describes and the dashboard would show a claim nobody holds.
         let rows = seen.get(body.project);
         if (!rows) seen.set(body.project, (rows = new Map()));
         const prev = rows.get(body.user);

@@ -81,6 +81,46 @@ test('the widened state enum is accepted and read back verbatim', async () => {
   } finally { await s.close(); }
 });
 
+// P20-S01 (D-089/D-090): the multi-driver delta is two OPTIONAL fields, not a new state value.
+test('lane and claim ride the beat, are mirrored into peers, and absence keeps today\'s shape', async () => {
+  const s = await start({ now: () => 3000 });
+  try {
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Tyler', step: 'P20-S01',
+      state: 'running', lane: 'Tyler', claim: 'P20-S01' })).status, 204);
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Reno', step: null, state: 'idle' })).status, 204);
+
+    const peers = (await (await s.peers()).json()).peers;
+    assert.deepStrictEqual(peers.find((p) => p.user === 'Tyler'),
+      { user: 'Tyler', step: 'P20-S01', state: 'running', ts: 3000, lane: 'Tyler', claim: 'P20-S01' });
+    // Absent is ABSENT, not null: the entry is byte-for-byte the pre-P20 shape, so a peer who
+    // never said renders as unknown rather than as "no claim" (D-090).
+    assert.deepStrictEqual(peers.find((p) => p.user === 'Reno'),
+      { user: 'Reno', step: null, state: 'idle', ts: 3000 });
+    // The claim is LIVE-only — history keeps its three fields and never persists a claim.
+    const rows = (await (await s.projects()).json()).projects[0].people;
+    assert.deepStrictEqual(Object.keys(rows[0]).sort(), ['lastRunning', 'lastSeen', 'step', 'user']);
+
+    // A3's asymmetry, closed in the same change that stores them: a stored field is a bounded field.
+    const long = 'X'.repeat(257);
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Mallory', state: 'idle', lane: long })).status, 400);
+    assert.strictEqual((await s.beat({ project: PROJECT, user: 'Mallory', state: 'idle', claim: long })).status, 400);
+    assert.strictEqual((await (await s.peers()).json()).peers.length, 2);
+  } finally { await s.close(); }
+});
+
+// The delta must NOT have grown the enum (D-089) — asserted here so a later step cannot quietly add one.
+test('STATES is unchanged by the lane/claim delta', async () => {
+  const s = await start();
+  try {
+    for (const state of ['handoff', 'claimed', 'blocked', 'open']) {
+      assert.strictEqual((await s.beat({ project: PROJECT, user: 'Mallory', state })).status, 400);
+    }
+    for (const state of ['running', 'waiting', 'paused', 'idle']) {
+      assert.strictEqual((await s.beat({ project: PROJECT, user: state, state })).status, 204);
+    }
+  } finally { await s.close(); }
+});
+
 test('a record older than 3 missed beats is dropped on read', async () => {
   let now = 0;
   const s = await start({ now: () => now });
