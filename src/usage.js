@@ -81,6 +81,21 @@ function parseResets(text, now = Date.now()) {
   };
 }
 
+// The reset clock as the panel says it (P16-S03, D-076): "resets in 42m". Pure, so it is unit-
+// tested without a webview, and engine-agnostic by construction — it reads only the snapshot's
+// epoch ms, so Codex gets the same string free at S08. A null clock renders NOTHING (never
+// "unknown", never a zero clock); a reset already in the past is the S0124 signal, said plainly.
+function resetText(at, now = Date.now()) {
+  if (at == null) return '';
+  const ms = at - now;
+  if (ms <= 0) return 'reset due';
+  const min = Math.round(ms / 60000);
+  if (min < 1) return 'resets in <1m';
+  if (min < 60) return `resets in ${min}m`;
+  const hr = Math.round(min / 60);
+  return hr < 48 ? `resets in ${hr}h` : `resets in ${Math.round(hr / 24)}d`;
+}
+
 // Each `claude -p /usage` spawns a throwaway Claude Code session that gets saved as a
 // transcript — polling every minute floods ~/.claude/projects (and the VS Code session
 // list) with hundreds of them. The JSON output carries the session_id, so delete that one
@@ -310,6 +325,6 @@ class UsageService extends EventEmitter {
 }
 
 module.exports = {
-  UsageService, defaultFetch, cleanupUsageSession, parseUsageText, parseResets, parseResetAt,
+  UsageService, defaultFetch, cleanupUsageSession, parseUsageText, parseResets, parseResetAt, resetText,
   spawnArgs, pollEnv, usesModel, FETCH_TIMEOUT_MS,
 };

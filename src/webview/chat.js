@@ -18,8 +18,8 @@
       <span class="ver" id="ver" title="Plan Runner version"></span>
     </div>
     <div class="meter" id="meter" hidden>
-      <div class="gauge" id="srow"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span></div>
-      <div class="gauge" id="wrow"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span></div>
+      <div class="gauge" id="srow"><span class="glabel">Session</span><progress id="sbar" max="100" value="0"></progress><span class="gpct" id="spct">—</span><span class="grst" id="srst" hidden></span></div>
+      <div class="gauge" id="wrow"><span class="glabel">Week</span><progress id="wbar" max="100" value="0"></progress><span class="gpct" id="wpct">—</span><span class="grst" id="wrst" hidden></span></div>
       <div class="gauge" id="frow"><span class="glabel" id="flabel">Fable</span><progress id="fbar" max="100" value="0"></progress><span class="gpct" id="fpct">—</span></div>
       <div class="gauge tokrow" id="tokrow" style="display:none" title="Total tokens processed this run (input incl. cached + output). Codex reports no account usage %."><span class="glabel">Tokens</span><span style="flex:1"></span><span class="gpct" id="tokval">—</span></div>
       <div class="uerr" id="uerr" hidden></div>
@@ -755,8 +755,15 @@
       paintGauge($('frow'), $('fbar'), $('fpct'), d.fable, modelScoped ? d.fableThreshold : null);
       m.classList.toggle('paused', !!d.paused); // hook painted by S08
     }
+    // The reset clock (D-076), outside the engine branch on purpose: it is whatever the snapshot
+    // supplied, so Codex gets it for free at S08 with no second renderer.
+    setReset($('srst'), d.sessionResets);
+    setReset($('wrst'), d.weekResets);
     paintUsageError(d, codex);
   }
+  // Hidden when there is nothing to say — an empty span would still take the row's flex gap, and
+  // "no clock" must cost no pixels (never "unknown", never a zero clock).
+  function setReset(el, text) { el.textContent = text || ''; el.hidden = !text; }
   // One bar + its own pause limit. A null limit means this bar can't pause the run (Codex, or a
   // model-scoped limit while another model is picked): paint the number, never the alarm.
   function paintGauge(row, bar, txt, v, limit) {

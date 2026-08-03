@@ -3,7 +3,7 @@
 // spends no Claude usage — fetch is faked, nothing spawns.
 const test = require('node:test');
 const assert = require('node:assert');
-const { UsageService, parseUsageText, parseResets, parseResetAt, spawnArgs, defaultFetch,
+const { UsageService, parseUsageText, parseResets, parseResetAt, resetText, spawnArgs, defaultFetch,
   pollEnv } = require('../src/usage');
 
 // Verbatim shape of a real `/usage` answer, including the per-model weekly line.
@@ -101,6 +101,21 @@ test('parseResets keeps a reset time that has already passed', () => {
   assert.strictEqual(r.sessionResetsAt, at(7, 2, 4, 30));
   assert.ok(r.sessionResetsAt < NOW, 'the clock the stale percentage was contradicting');
   assert.strictEqual(r.weekResetsAt, null, 'no weekly line in this sample');
+});
+
+// P16-S03: what the panel actually paints. The empty string is the "render nothing" contract —
+// no "unknown", no zero clock — and the panel hides the element on it.
+test('resetText says the clock the way the panel shows it', () => {
+  const m = (n) => NOW + n * 60000;
+  assert.strictEqual(resetText(null, NOW), '', 'no clock renders nothing at all');
+  assert.strictEqual(resetText(undefined, NOW), '');
+  assert.strictEqual(resetText(m(42), NOW), 'resets in 42m');
+  assert.strictEqual(resetText(m(0.4), NOW), 'resets in <1m', 'never rounded down to a zero clock');
+  assert.strictEqual(resetText(m(180), NOW), 'resets in 3h');
+  assert.strictEqual(resetText(m(60 * 72), NOW), 'resets in 3d', 'a weekly window is days out');
+  // The S0124 case: the reset already passed while the percentage still said 99%.
+  assert.strictEqual(resetText(m(-29), NOW), 'reset due');
+  assert.strictEqual(resetText(NOW, NOW), 'reset due', 'the boundary itself is not a countdown');
 });
 
 test('a /usage line with no reset clause parses its percentage and reports no clock', () => {

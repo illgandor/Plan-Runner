@@ -12,7 +12,7 @@ const { Runner, readLedger, buildDigest } = require('./runner');
 const { isMasterPlan, readPointer, readPlanFraction } = require('./progress');
 const skills = require('./skills');
 const updater = require('./updater');
-const { UsageService } = require('./usage');
+const { UsageService, resetText } = require('./usage');
 const { startPresence, runState } = require('./presence');
 
 // Capability lists live in engine.js (single source of truth). caps() gives the SELECTED
@@ -201,7 +201,10 @@ function postSettings() {
 function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week,
   fable: s.fable, fableLabel: s.fableLabel, max: s.max, threshold: s.threshold,
   weekThreshold: s.weekThreshold, fableThreshold: s.fableThreshold, model: effectiveModel(),
-  paused: !!(runner && runner.paused), error: s.error, checked: s.checked }); }
+  paused: !!(runner && runner.paused), error: s.error, checked: s.checked,
+  // P16-S03: the clock is formatted HERE (usage.js resetText, pure + tested) so the panel only
+  // paints a string it is given and decides nothing — '' when there is no clock to show.
+  sessionResets: resetText(s.sessionResetsAt), weekResets: resetText(s.weekResetsAt) }); }
 
 // " · done/total" from PROGRESS.md, or "" when unreadable/not a master-plan project (P09-S15).
 function planFrac(dir) { const f = readPlanFraction(dir); return f ? ` · ${f.done}/${f.total}` : ''; }
