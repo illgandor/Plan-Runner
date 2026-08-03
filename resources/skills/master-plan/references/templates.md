@@ -44,6 +44,15 @@ Note: {{<=2 sentences of orientation. Never restate the step spec.}}
 
 ## Board — PLAN-01 (active)
 Drivers: {{name}} · {{name}} — relay.  {{INCLUDE ONLY IF several people drive this plan; OMIT ENTIRELY when solo}}
+{{PARALLEL instead — an accepted split rides this SAME line, after the mode, and lives nowhere else:
+  Drivers: ann · bo — parallel.  Lanes: ann = S02, S04, S06 (src/**) · bo = S03, S05 (presence-server/**)
+  Each lane carries who · its steps · its footprint summary. Re-derive to change it, never hand-edit,
+  and re-lane only at a plan boundary (conversion-rules.md §Lane proposal).}}
+{{NEVER a `| Lane |` board column, however obvious it looks: the checker reads the step id from a FIXED
+  cell index, so a prepended column makes every row unrecognised at once and board parity collapses
+  wholesale rather than degrading — measured at 2 FAILs, one of them a 122-char row over the 120 cap.
+  The roster line above measured 0 added warnings. Never in a plan file either: a plan is hash-locked
+  and a lane is not spec, so a clone cannot record who does what without breaking the hash.}}
 Lane-ignore: package.json · package-lock.json  {{version-bump-only paths a split ignores; OMIT when solo}}
 Legend: ⬜ todo · 🔧 in progress · ✅ done · ⏸️ parked · ❌ dropped (see amendment) · 👤⬜/👤🔧/👤✅ owner-gated
 | Step | Title | M | Status | Done (date · sha7) |

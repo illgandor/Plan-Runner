@@ -120,7 +120,26 @@ A footprint that cannot be proven disjoint — refuse and name it, never ask:
 > which I can't prove disjoint from S06's. Tighten that field or run the plan
 > serial.
 
-An accepted split is written to the board's roster line and nowhere else.
+**An accepted split is written to the board's roster line and nowhere else.** It
+rides the line that already sits under the active board heading, after the mode,
+carrying each lane, its steps and its footprint summary:
+
+```
+Drivers: ann · bo — parallel.  Lanes: ann = S02, S04, S06 (src/**) · bo = S03, S05 (presence-server/**)
+```
+
+**Never a `| Lane |` board column**, however obvious it looks — this is the finding
+that inverts the design. The checker reads the step id from a FIXED cell index, so a
+prepended column makes every row unrecognised at once and board parity collapses
+wholesale rather than degrading: measured at 2 FAILs, one of them a 122-char row over
+the 120 cap. The roster line measured 0 added warnings. **Never in a plan file**
+either — a plan is hash-locked and a lane is not spec, so recording one there breaks
+the hash for the other clone. The board otherwise stays shared: it is not the
+contended surface, the pointer and the session log are.
+
+**Re-lane only at a plan boundary.** Mid-plan re-laning moves a step out from under a
+driver who may already hold its claim ref, and that ref is the whole reason a handoff
+is safe. A boundary is attended; that is when the owner re-derives.
 
 **A chained conversion emits none of this, whatever the mode.** It converts the
 incoming plan in relay shape — one lane holds S01, every other lane is written
@@ -337,7 +356,8 @@ a Note — and three drivers are out of scope anyway.
 **When to switch.** Relay any time, including mid-plan: it needs no split, so it is
 usable the moment the pointer form ships. Parallel waits for a plan boundary —
 re-laning a half-executed plan means proposing a split over steps whose `**Files:**`
-the finished work has already contradicted.
+the finished work has already contradicted, and it moves a step out from under a
+driver who may already hold its claim ref (§Lane proposal).
 
 ## §Adopt — migrating a legacy project
 
