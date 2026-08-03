@@ -146,12 +146,10 @@ test('interruptTurn refuses when there is nothing safe to interrupt', () => {
     const idle = new Runner(project);
     assert.strictEqual(idle.interruptTurn(), false, 'not running → nothing to interrupt');
 
-    // Codex has no mid-turn interrupt that keeps the loop coherent (D-023): its child dies emitting
-    // nothing, so _onTurnEnd never fires and the loop would hang with _turnLive stuck true. State is
-    // set directly rather than start()ed — a codex runner would spawn the real `codex` binary.
-    const cx = new Runner({ ...project, engine: 'codex' });
-    cx.running = true; cx._turnLive = true;
-    assert.strictEqual(cx.interruptTurn(), false, 'refused on Codex');
-    assert.strictEqual(cx.paused, false, 'and left the turn alone');
+    const live = new Runner(project);
+    live.usageGate = { isOverThreshold() { return false; } };
+    live.start();
+    live.pauseManual();
+    assert.strictEqual(live.interruptTurn(), false, 'already paused → nothing to interrupt');
   } finally { restore(); }
 });

@@ -80,7 +80,22 @@ test('Stop cancels a pending resume', () => {
   } finally { restore(); }
 });
 
-// P07-S02 (D-023): owner-driven Pause/Resume, Claude only, and the usage gate must NOT
+// Swap the CODEX provider for the same spies (the Runner resolves it via engine.provider).
+// currentSessionId returns the persisted THREAD id — that is what `codex exec resume` takes.
+function fakeCodex() {
+  const codex = require('../src/codex');
+  const calls = { start: [], interrupt: 0, stop: 0 };
+  const orig = {};
+  for (const k of ['start', 'interrupt', 'stop', 'currentSessionId']) orig[k] = codex[k];
+  codex.start = (args) => { calls.start.push(args); return {}; };        // never fires hooks.send → turn stays live
+  codex.interrupt = () => { calls.interrupt++; };
+  codex.stop = () => { calls.stop++; };
+  codex.currentSessionId = () => 'thread-live';
+  const restore = () => { for (const k of Object.keys(orig)) codex[k] = orig[k]; };
+  return { calls, restore };
+}
+
+// P07-S02 (D-023): owner-driven Pause/Resume, and the usage gate must NOT
 // auto-resume a manual hold when usage happens to drop.
 test('manual Pause holds; a usage drop does NOT auto-resume; resumeManual re-enters the step', () => {
   const { calls, restore } = fakeSession();
@@ -107,14 +122,45 @@ test('manual Pause holds; a usage drop does NOT auto-resume; resumeManual re-ent
   } finally { restore(); }
 });
 
-test('pauseManual is refused on Codex (no mid-turn interrupt)', () => {
+// P16-S09 (D-077) retires D-023's Claude-only half: `codex exec resume <SESSION_ID> [PROMPT]`
+// is a real CLI subcommand (observed on codex-cli 0.144.2), and the usage gate has driven this
+// exact interrupt→resume path on Codex since P16-S08. So the manual hold works there too.
+test('manual Pause holds a Codex turn and resumes it on the persisted thread id', () => {
+  const { calls, restore } = fakeCodex();
+  try {
+    const r = new Runner(tempProject('P16-S09', 'codex'));
+    r.usageGate = { over: false, isOverThreshold() { return false; } };
+
+    r.start();
+    assert.strictEqual(calls.start.length, 1, 'step started a fresh Codex turn');
+
+    r.pauseManual();
+    assert.strictEqual(calls.interrupt, 1, 'the live child is interrupted');
+    assert.strictEqual(r.paused, true, 'Codex runner is held');
+    assert.strictEqual(r.manualPause, true, 'flagged as a manual hold');
+    assert.strictEqual(r._turnLive, false, 'the turn is not left marked live');
+
+    r.onUsageUpdate();                          // usage under — must not auto-resume a manual hold
+    assert.strictEqual(calls.start.length, 1, 'a usage tick never auto-resumes a manual pause');
+
+    r.resumeManual();
+    assert.strictEqual(calls.start.length, 2, 'resume re-entered the same step');
+    assert.strictEqual(calls.start[1].options.resume, 'thread-live', 'resumed onto the Codex thread id');
+    assert.strictEqual(r.paused, false);
+    assert.strictEqual(r.manualPause, false, 'manual flag cleared on resume');
+  } finally { restore(); }
+});
+
+// D-074: the parity change must not alter Claude. Same sequence, Claude provider, unchanged.
+test('the Codex parity change leaves the Claude manual-hold path byte-identical', () => {
   const { calls, restore } = fakeSession();
   try {
-    const r = new Runner(tempProject('P07-S02', 'codex'));
+    const r = new Runner(tempProject('P16-S09'));
     r.usageGate = { over: false, isOverThreshold() { return false; } };
-    r.running = true; r._turnLive = true;       // simulate a live turn without driving a real Codex session
+    r.start();
     r.pauseManual();
-    assert.strictEqual(r.paused, false, 'Codex is never paused mid-turn');
-    assert.strictEqual(calls.interrupt, 0, 'no interrupt issued for Codex');
+    assert.strictEqual(calls.interrupt, 1, 'Claude still interrupts on a manual pause');
+    r.resumeManual();
+    assert.strictEqual(calls.start[1].options.resume, 'sess-live', 'Claude still resumes its SDK session id');
   } finally { restore(); }
 });

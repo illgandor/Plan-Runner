@@ -315,7 +315,7 @@ async function onMessage(m) {
     case 'abort':  // hard: tear the session down now, mid-step
       runner?.abort();
       break;
-    case 'pause':  // owner hold the live Claude turn (D-023); runner refuses on Codex
+    case 'pause':  // owner hold the live turn — either engine since P16-S09 (D-077)
       runner?.pauseManual();
       break;
     case 'resume': // continue the same step after a manual pause

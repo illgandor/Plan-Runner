@@ -149,7 +149,7 @@ class Runner extends EventEmitter {
     this._gen = 0;
     this.usageGate = null;   // { isOverThreshold() } — set by the extension (UsageService)
     this.paused = false;     // held on the usage gate (between-steps OR mid-turn)
-    this.manualPause = false; // owner-set hold (Claude only, D-023) — usage gate won't auto-resume it
+    this.manualPause = false; // owner-set hold (either engine, D-077) — usage gate won't auto-resume it
     this.gating = false;     // true = between-steps hold (no live session yet)
     this._turnLive = false;  // true only while a step's turn is actively streaming
     this._resumeId = null;   // session id captured at pause, replayed on resume
@@ -210,10 +210,11 @@ class Runner extends EventEmitter {
   // advances past the step or retries it; on Codex the child dies emitting nothing at all and the
   // loop hangs with _turnLive stuck true). _pause() does the bookkeeping BEFORE the interrupt, so
   // _onTurnEnd's `paused` guard drops the turn-end and Resume re-enters the same step.
-  // Returns false when there's nothing safe to interrupt (no live turn, or Codex — see D-023).
+  // Returns false when there's nothing safe to interrupt (no live turn). Both engines: the
+  // Codex refusal was retired in P16-S09 (D-077) — _pause() does the bookkeeping first, so the
+  // dead child is expected rather than read as a turn-end.
   interruptTurn() {
     if (!this.running || this.paused || !this._turnLive) return false;
-    if ((this.project.engine || 'claude') === 'codex') return false;
     this.pauseManual();
     return this.paused;
   }
@@ -545,12 +546,14 @@ class Runner extends EventEmitter {
     if (over && this._turnLive) this._pause();
   }
 
-  // Owner-driven Pause/Resume (D-023) — Claude only (Codex has no mid-turn interrupt). Reuses the
-  // usage-gate pause machinery but flags it so a usage drop won't auto-resume a hold the owner set.
-  // No live turn (idle/gating/already paused) → nothing to pause. The webview hides the button on
-  // Codex; this refusal is the host-side backstop.
+  // Owner-driven Pause/Resume — BOTH engines since P16-S09 (D-077 retires D-023's Claude-only
+  // half). Reuses the usage-gate pause machinery but flags it so a usage drop won't auto-resume a
+  // hold the owner set. That machinery already runs on Codex (P16-S08 dropped _over()'s engine
+  // exclusion): interrupt kills the child with `aborted` set — so it emits nothing and _pause()'s
+  // own bookkeeping, not a turn-end, is what the loop acts on — and the thread id survives, so
+  // _resume() re-enters the same step via `codex exec resume <thread>`.
+  // No live turn (idle/gating/already paused) → nothing to pause.
   pauseManual() {
-    if ((this.project.engine || 'claude') === 'codex') return;
     if (!this.running || this.paused || !this._turnLive) return;
     this.manualPause = true;
     this._pause();

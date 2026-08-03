@@ -57,8 +57,9 @@ Pick the engine in the panel; the rest of the UI stays the same.
 
 The Claude code path is unchanged when Codex isn't selected; the webview and loop are
 engine-agnostic, so streaming and the run controls work the same either way. The account
-**usage meter and its pause gates are Claude-only** — Codex exposes no `/usage` %, so it
-shows N/A with a plain token counter instead.
+usage meter and its pause gates work on **both** engines — Claude from `claude /usage`, Codex
+from the limits it writes to its own session files. Codex has no per-model weekly window, so
+that third bar is hidden there and a plain token counter is shown alongside instead.
 
 ## Panel features
 
@@ -75,8 +76,8 @@ the editor's own diff theme; long tool output collapses behind a **show more**.
 - **Stop now** — halts the whole run immediately, mid-step, without waiting for close-out.
 - **Interrupt** — interrupts the turn in progress. Chat only; during a run use **Pause**, which
   is the same interrupt done while holding the step.
-- **Pause / Resume** — Claude-only mid-turn hold: interrupts the current turn (session kept)
-  and resumes the same step on demand. Hidden when Codex is selected.
+- **Pause / Resume** — mid-turn hold on either engine: interrupts the current turn (the session
+  or Codex thread is kept) and resumes the same step on demand.
 
 ### Leaving it running unattended
 
