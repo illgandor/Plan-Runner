@@ -49,6 +49,30 @@ test('a peer that is waiting or paused says so; a running one does not', () => {
   assert.match(el.textContent, /Reno · P03-S10 · paused · 0s ago/);
 });
 
+// P20-S02 / D-090. An older server strips the two fields (doc 05 A1) and an unlaned driver never
+// sends them, so ABSENT must read as unknown: the panel says nothing rather than asserting a claim
+// nobody made. This is §3's three-valued discipline applied one level down.
+test('a peer with no lane or claim renders exactly as before, asserting nothing about either', () => {
+  const el = fakeEl();
+  renderPresence(el, [{ user: 'Reno', step: 'P20-S02', state: 'running', ts: T0 - 120_000 }], T0);
+  assert.strictEqual(el.textContent, '● Reno · P20-S02 · 2m ago');
+  assert.doesNotMatch(el.textContent, /claim|holds|lane|unclaimed/i, 'silence, not "no claim"');
+});
+
+test('a claim prints when present; the lane prints only when it is not the name already shown', () => {
+  const el = fakeEl();
+  renderPresence(el, [{ user: 'Reno', lane: 'Reno', claim: 'P20-S03', step: 'P20-S03',
+    state: 'running', ts: T0 }], T0);
+  assert.strictEqual(el.textContent, '● Reno · P20-S03 · holds P20-S03 · 0s ago',
+    'D-079 makes lane === user for our own client, so printing both would read "Reno · lane Reno"');
+  renderPresence(el, [{ user: 'someone', lane: 'reno', claim: 'P20-S03', ts: T0 }], T0);
+  assert.match(el.textContent, /someone · lane reno · holds P20-S03 · 0s ago/);
+  // A claim held while nothing is running is exactly the state worth seeing — a step can also run
+  // UNCLAIMED (the unreachable fail-open), so the two fields are never each other's proxy.
+  renderPresence(el, [{ user: 'Reno', claim: 'P20-S04', state: 'idle', ts: T0 }], T0);
+  assert.match(el.textContent, /Reno · idle · holds P20-S04 · 0s ago/);
+});
+
 test('relative time buckets: seconds, minutes, hours', () => {
   const at = (ms) => presenceLabel([{ user: 'a', ts: T0 - ms }], T0).text;
   assert.match(at(30_000), /30s ago/);

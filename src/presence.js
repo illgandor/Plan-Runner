@@ -59,19 +59,30 @@ function req(cfg, opts) {
   };
 }
 
+// The step this window actually HOLDS the claim ref for (P20-S02). Only `taken` counts: a `held`
+// step is the OTHER driver's, and an `unreachable` one is being run unclaimed on purpose (INV-7).
+// Beating either as ours would paint a lock on the dashboard that `git ls-remote` says isn't there.
+// Pure + exported so the mapping is a unit test rather than a claim inside extension.js.
+function claimStep(claim) {
+  return claim && claim.verdict === 'taken' ? claim.step : null;
+}
+
 // Fire-and-forget: POST /heartbeat -> 204. Returns true on success, null on anything else.
-async function heartbeat({ state, step } = {}, opts = {}) {
+async function heartbeat({ state, step, lane, claim } = {}, opts = {}) {
   const ctx = ready(opts);
   if (!ctx) return null;
   const doFetch = opts.fetch || globalThis.fetch;
+  const body = {
+    project: ctx.project, user: ctx.user, step: step || null,
+    state: STATES.has(state) ? state : 'idle', ts: Date.now(),
+  };
+  // §Presence P20-S01: both fields are OPTIONAL, and absent means absent (D-090) — a `lane: null`
+  // key asserts "no lane" where the truth is "this client never said". No lane ⇒ no claim either:
+  // claims are inert without one (D-084), so an unlaned project beats exactly today's body.
+  if (lane) { body.lane = lane; if (claim) body.claim = claim; }
   try {
     const res = await doFetch(`${ctx.cfg.url}/heartbeat`, {
-      ...req(ctx.cfg, opts),
-      method: 'POST',
-      body: JSON.stringify({
-        project: ctx.project, user: ctx.user, step: step || null,
-        state: STATES.has(state) ? state : 'idle', ts: Date.now(),
-      }),
+      ...req(ctx.cfg, opts), method: 'POST', body: JSON.stringify(body),
     });
     return res.ok ? true : null;
   } catch { return null; }
@@ -130,7 +141,7 @@ function startPresence(opts = {}) {
   const clearTimer = opts.clearTimer || clearInterval;
   const onPeers = opts.onPeers || (() => {});
   const client = opts.client || { heartbeat, peers, reportUsage };
-  let timer = null, last = null, ok = null, cur = { state: 'idle', step: null };
+  let timer = null, last = null, ok = null, cur = { state: 'idle', step: null, lane: null, claim: null };
   let usage = null;   // the latest §Usage snapshot; see setUsage below
   let opt = opts; // opts + the resolved identity, so a tick spawns no git at all
 
@@ -147,7 +158,7 @@ function startPresence(opts = {}) {
   function stop() { if (timer) clearTimer(timer); timer = null; last = null; }
   // Hidden panel, no config or no git remote → no timer and no request at all (D-039). ready() is
   // two git execs, so it is resolved once per loop; a settings edit disposes the loop instead.
-  function update({ visible, state, step } = {}) {
+  function update({ visible, state, step, lane, claim } = {}) {
     if (ok === null) {
       const ctx = ready(opts);
       ok = !!ctx;
@@ -159,13 +170,17 @@ function startPresence(opts = {}) {
     // (below), so nobody waits five minutes to see that a step started asking.
     const st = STATES.has(state) ? state : 'idle';
     const ms = visible ? (st === 'running' ? RUNNING_MS : IDLE_MS) : 0;
-    const key = `${ms}|${st}|${step || ''}`;
+    // P20-S02: the claim joins the key — taking or releasing one is a real transition, and the
+    // other driver learning it five minutes late is the whole thing this plan is fixing. The LANE
+    // deliberately stays out: it is a settings fact, and a presenceName edit disposes the whole
+    // loop (extension.js), so it can never change under a live key.
+    const key = `${ms}|${st}|${step || ''}|${claim || ''}`;
     if (key === last) return; // same cadence AND same step → let the running timer be
     last = key;
     if (timer) clearTimer(timer);
     timer = null;
     if (!ms) return;
-    cur = { state: st, step: step || null };
+    cur = { state: st, step: step || null, lane: lane || null, claim: claim || null };
     timer = setTimer(tick, ms);
     tick(); // report the transition now, not one interval late
   }
@@ -173,6 +188,6 @@ function startPresence(opts = {}) {
 }
 
 module.exports = {
-  heartbeat, peers, reportUsage, displayName, startPresence, runState,
+  heartbeat, peers, reportUsage, displayName, startPresence, runState, claimStep,
   TIMEOUT_MS, RUNNING_MS, IDLE_MS, STATES,
 };

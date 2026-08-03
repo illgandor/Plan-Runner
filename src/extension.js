@@ -14,7 +14,7 @@ const claims = require('./claims');   // ONLY for the break command — the runn
 const skills = require('./skills');
 const updater = require('./updater');
 const { UsageService, resetText } = require('./usage');
-const { startPresence, runState } = require('./presence');
+const { startPresence, runState, claimStep } = require('./presence');
 
 // Capability lists live in engine.js (single source of truth). caps() gives the SELECTED
 // engine's models/efforts/permissionModes so the dropdowns and validation re-skin per engine.
@@ -131,8 +131,14 @@ function syncPresence() {
   // and cleared only by 'done', so it stays set through a question, a hold and a finished-but-never-
   // closed run. The runner's live flags say what that step is actually DOING (A-P10-09); read them
   // per beat rather than shadowing them in a variable that another event has to remember to clear.
+  // P20-S02: the lane IS presenceName (D-079), so p.lane is that same one string. The claim is read
+  // off the runner's OWN field per beat — on the events this function already runs on (status/done/
+  // paused), never by a call INTO the runner, which gains no presence reference at all (INV-4).
+  // Not shadowed in a variable here for the same reason A-P10-09 stopped shadowing the state: a copy
+  // is a copy some other event has to remember to clear, and the one that forgets ships a stale lock.
   presence.update({ visible: !!(view && view.visible), step: runningStep,
-    state: runState({ step: runningStep, paused: runner?.paused, needsYou: runner?.needsYou }) });
+    state: runState({ step: runningStep, paused: runner?.paused, needsYou: runner?.needsYou }),
+    lane: p.lane || null, claim: claimStep(runner?._claim) });
 }
 
 // One OS notification per transition (needs-you/paused warn, done info). Dedupe on `key` so a

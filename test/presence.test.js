@@ -8,7 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  heartbeat, peers, reportUsage, displayName, startPresence, runState,
+  heartbeat, peers, reportUsage, displayName, startPresence, runState, claimStep,
   TIMEOUT_MS, RUNNING_MS, IDLE_MS,
 } = require('../src/presence');
 const { readPointer, isLaned } = require('../src/progress');
@@ -289,6 +289,68 @@ test('runner.js contains no presence call', () => {
   const src = fs.readFileSync(require.resolve('../src/runner.js'), 'utf8');
   assert.ok(!/require\(['"][^'"]*presence/i.test(src), 'the runner may not import presence at all');
   assert.ok(!/\bpresence\w*\s*\.\s*\w+\s*\(/i.test(src), 'nor call one through any other handle');
+});
+
+// ---- P20-S02: the two optional fields, client side ----
+// Both are OPTIONAL forever (§Presence, D-089): an unlaned project must beat exactly the body it
+// beats today, and absent must stay ABSENT — a `lane: null` key asserts "no lane" where the truth
+// is "this client never said", which is the one thing D-090 forbids.
+test('the beat carries lane and claim when laned, and neither key at all without a lane', async () => {
+  const bodies = [];
+  const { server, url } = await serve((rq, rs) => {
+    let body = '';
+    rq.on('data', (c) => { body += c; });
+    rq.on('end', () => { bodies.push(JSON.parse(body)); rs.writeHead(204).end(); });
+  });
+  const laned = opts(url, { settings: { url, token: 'sekret', name: 'reno' } });
+  try {
+    await heartbeat({ state: 'running', step: 'P20-S02', lane: 'reno', claim: 'P20-S02' }, laned);
+    assert.deepStrictEqual([bodies[0].lane, bodies[0].claim], ['reno', 'P20-S02']);
+    assert.strictEqual(bodies[0].user, 'reno', 'one identity (D-079): the lane IS the reported user');
+
+    await heartbeat({ state: 'running', step: 'P20-S02', lane: 'reno' }, laned);
+    assert.strictEqual(bodies[1].lane, 'reno');
+    assert.ok(!('claim' in bodies[1]), 'a lane holding nothing says nothing about a claim');
+
+    await heartbeat({ state: 'running', step: 'P20-S02', lane: '', claim: null }, opts(url));
+    assert.deepStrictEqual(Object.keys(bodies[2]).sort(), ['project', 'state', 'step', 'ts', 'user'],
+      'no lane → today\'s body exactly; claims are inert without one (D-084), so neither key ships');
+  } finally { server.close(); }
+});
+
+test('only a TAKEN claim is beaten as ours', () => {
+  assert.strictEqual(claimStep({ step: 'P20-S02', verdict: 'taken' }), 'P20-S02');
+  assert.strictEqual(claimStep({ step: 'P20-S02', verdict: 'held' }), null, 'that one is the other driver\'s');
+  assert.strictEqual(claimStep({ step: 'P20-S02', verdict: 'unreachable' }), null,
+    'the fail-open runs the step UNCLAIMED (INV-7) — never paint a lock git does not have');
+  assert.strictEqual(claimStep(null), null);
+  assert.strictEqual(claimStep(), null);
+});
+
+test('a claim change re-keys the cadence; an unchanged one does not', () => {
+  const { l, calls } = loop();
+  const beat = (claim) => l.update({ visible: true, state: 'running', step: 'P20-S02', lane: 'tyler', claim });
+  beat('P20-S02');
+  assert.deepStrictEqual([calls[0].lane, calls[0].claim], ['tyler', 'P20-S02']);
+  beat('P20-S02');
+  assert.strictEqual(calls.length, 2, 'an unchanged claim does not re-arm or re-send');
+  beat(null);
+  assert.strictEqual(calls.length, 4, 'releasing it is a real transition — reported now, not 5m late');
+  assert.strictEqual(calls[2].claim, null);
+});
+
+// doc 05 §3.2, enforcement point 2. `null` survives JSON.stringify intact, which is the only reason
+// the renderer still gets three values. One `peers || []` on that hop turns unknown into alone
+// silently — one character, and the panel starts asserting the one thing it cannot know.
+test('the host→webview hop keeps peers three-valued: no `peers || []` anywhere in src/', () => {
+  const root = path.join(__dirname, '..', 'src');
+  for (const f of fs.readdirSync(root, { recursive: true })) {
+    if (!String(f).endsWith('.js')) continue;
+    assert.doesNotMatch(fs.readFileSync(path.join(root, String(f)), 'utf8'), /peers\s*\|\|\s*\[\]/,
+      `${f} collapses "unknown" into "alone"`);
+  }
+  assert.match(fs.readFileSync(path.join(root, 'extension.js'), 'utf8'),
+    /post\(\{ kind: 'presence', peers \}\)/, 'the host posts the raw, unmassaged peers value');
 });
 
 test('the display name follows the §Presence precedence and the timeout obeys the contract', () => {

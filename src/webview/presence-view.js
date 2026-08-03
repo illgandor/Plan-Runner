@@ -13,6 +13,9 @@
   // Three of the four states; the fourth (unconfigured) never reaches here — the host sends no
   // presence message at all, so chat.js never creates the element (D-039).
   // peers: null = server unreachable (unknown) · [] = nobody else (alone) · [{user, step, state, ts}]
+  // Entries may also carry `lane`/`claim` (P20-S02). Both are OPTIONAL for good: an older server
+  // strips them and an unlaned driver never sends them, so ABSENT is printed as nothing at all —
+  // never as "no claim" (D-090). Silence is unknown here, the same discipline `peers` itself keeps.
   function presenceLabel(peers, now) {
     if (peers == null) return { state: 'unknown', text: '◌ presence unavailable' };
     if (!peers.length) return { state: 'alone', text: '○ only you on this project' };
@@ -21,8 +24,14 @@
       state: 'peer',
       // The state is shown only when it is NOT a live run: "Reno · P03-S10 · waiting · 2m ago".
       // Printing "running" on every peer would be noise, and its absence is what running means here.
-      text: '● ' + peers.map((p) => [p.user || 'someone', p.step,
-        p.state && p.state !== 'running' ? p.state : null, p.ts ? ago(p.ts, t) : null]
+      // The lane is only printed when it is NOT the name already shown: D-079 makes them the same
+      // string for our own client, so printing both would read "Reno · lane Reno". The claim IS
+      // worth its own field even next to the step — a step can run unclaimed (the unreachable
+      // fail-open), and a claim outlives the beat's step while the loop is between steps.
+      text: '● ' + peers.map((p) => [p.user || 'someone',
+        p.lane && p.lane !== p.user ? 'lane ' + p.lane : null, p.step,
+        p.state && p.state !== 'running' ? p.state : null,
+        p.claim ? 'holds ' + p.claim : null, p.ts ? ago(p.ts, t) : null]
         .filter(Boolean).join(' · ')).join(', '),
     };
   }
