@@ -43,6 +43,7 @@ Note: {{<=2 sentences of orientation. Never restate the step spec.}}
 (Plan statuses: 🔵 ACTIVE · ⏳ QUEUED · ⏸️ PARKED → archive/PLAN-NN-PARKED.md · ✅ COMPLETE · ❌ ABANDONED)
 
 ## Board — PLAN-01 (active)
+Drivers: {{name}} · {{name}} — relay.  {{INCLUDE ONLY IF several people drive this plan; OMIT ENTIRELY when solo}}
 Legend: ⬜ todo · 🔧 in progress · ✅ done · ⏸️ parked · ❌ dropped (see amendment) · 👤⬜/👤🔧/👤✅ owner-gated
 | Step | Title | M | Status | Done (date · sha7) |
 |---|---|---|---|---|
@@ -328,6 +329,10 @@ everyone else, so it is unfixable by construction. Say "the repo root" or "the
 folder holding PROGRESS.md", never the path you happen to be sitting in.
 
 ## Shared-repo rules  {{INCLUDE ONLY IF several people drive this plan — STEP 1.5}}
+Mode: relay — one driver at a time. Drivers: {{name}} · {{name}}.
+(The board's roster line says the same thing where the owner reads status; this says it
+where the rules live. Prose in both places — never a Lane column, never frontmatter.)
+
 PROGRESS.md is single-writer by design: session IDs are sequential and ▶ NEXT
 STEP is one cursor into a linear plan. There is no correct merge of "next is S07"
 and "next is S08", so the pointer cannot be reconciled after the fact — it has to
