@@ -217,6 +217,33 @@ def overlaps(a, b):
                for ta in a for tb in b)
 
 
+def lane_ignore(progress_text):
+    """Paths a lane split may ignore, DECLARED on a `Lane-ignore:` line beneath
+    the board's roster line — never inferred, and absent line = ignore nothing,
+    so the strict rule is the default. Research 02 §F-4: package.json and
+    package-lock.json appear in 12+ corpus steps, nearly always for a two-line
+    version bump, and strict disjointness then serialises a whole plan on them.
+    That is a defect in the input, so the answer is to fix the input, not to
+    soften the rule (doc 07 §4.2) — and it is declared where a human reads
+    status, because a hidden allowance is how a checker stops being trusted."""
+    m = re.search(r"^Lane-ignore:(.*)$", progress_text, re.M)
+    return files_tokens(m.group(1)) if m else []
+
+
+def drop_ignored(foot, ignore):
+    """Drop declared-ignorable tokens from a footprint before overlaps() sees it.
+    Containment is DIRECTED — an ignore entry covers tokens beneath it, never the
+    reverse — so ignoring `src/webview/chat.js` can never erase a step's whole
+    `src/` footprint. A step left with nothing becomes empty, which overlaps()
+    already reads as conflicting-with-everything; that is the safe reading and it
+    is deliberately not special-cased away."""
+    def covered(t):
+        return any(t == ig or t.startswith(ig.rstrip("/") + "/")
+                   or ("*" in ig and t.startswith(ig.split("*")[0]))
+                   for ig in ignore)
+    return [t for t in foot if not covered(t)]
+
+
 def step_block(lines, start, end):
     """The block for the step heading at `start`: up to the next heading of ANY
     level (## section, ### milestone), not just the next #### step, trailing
@@ -282,13 +309,15 @@ def concurrent(a, b, anc, foot):
             and not overlaps(foot[a], foot[b]))
 
 
-def schedule(steps, width=LANE_WIDTH):
+def schedule(steps, width=LANE_WIDTH, ignore=()):
     """Greedy rounds (research 02 §7 step 4): take every dep-ready step, seed the
     round with the first, then add further ready steps while concurrent() holds
     against all already picked and the round is under `width`. Greedy is NOT
-    optimal, so what this saves is a LOWER bound on the pairing available."""
+    optimal, so what this saves is a LOWER bound on the pairing available.
+    `ignore` is the declared Lane-ignore list and is applied ONCE, here, so
+    overlaps() itself never learns about exceptions."""
     deps = {sid: d for sid, d, _ in steps}
-    foot = {sid: f for sid, _, f in steps}
+    foot = {sid: drop_ignored(f, ignore) for sid, _, f in steps}
     anc = ancestors(deps)
     order = [sid for sid, _, _ in steps]
     done, rounds = set(), []
@@ -322,9 +351,14 @@ def lanes(root: Path, want):
     if not steps:
         print(f"{f.name}: no step headings to schedule")
         return 1
-    rounds = schedule(steps)
+    prog = root / "PROGRESS.md"
+    ignore = lane_ignore(read(prog)) if prog.is_file() else []
+    rounds = schedule(steps, ignore=ignore)
     saved = len(steps) - len(rounds)
     print(f"{f.stem} — {len(steps)} steps -> {len(rounds)} rounds, {saved} saved")
+    print(("ignoring, as declared on PROGRESS.md's Lane-ignore line: "
+           + " · ".join(ignore)) if ignore else
+          "no Lane-ignore line declared: every path counts (the strict rule).")
     for n, rd in enumerate(rounds, 1):
         print(f"  {n:>2}  {' ‖ '.join(rd)}{'   <- fork' if len(rd) > 1 else ''}")
     forks = [rd for rd in rounds if len(rd) > 1]
@@ -378,6 +412,30 @@ def selftest():
     checks.append(("ancestors memoised", sorted(computed), ["a", "b", "c", "d"]))
     checks.append(("ancestors terminates on a cycle",
                    set(ancestors({"x": ["y"], "y": ["x"]})), {"x", "y"}))
+
+    # The declared ignore list (research 02 §F-4): a shared version bump must not
+    # serialise a plan, the strict rule stays the default, and a footprint that is
+    # ONLY ignorable paths still conflicts with everything.
+    bump = [("P00-S01", [], ["src/a.js", "package.json"]),
+            ("P00-S02", [], ["src/b.js", "package.json"])]
+    checks.append(("declared ignore pairs a shared version bump",
+                   schedule(bump, ignore=["package.json"]), [["P00-S01", "P00-S02"]]))
+    checks.append(("no declaration = the strict rule",
+                   schedule(bump), [["P00-S01"], ["P00-S02"]]))
+    checks.append(("an all-ignored footprint still conflicts",
+                   schedule([("P00-S01", [], ["package.json"]),
+                             ("P00-S02", [], ["src/b.js"])], ignore=["package.json"]),
+                   [["P00-S01"], ["P00-S02"]]))
+    checks.append(("Lane-ignore is read only where declared",
+                   [lane_ignore("Drivers: a · b — relay.\n"
+                                "Lane-ignore: package.json · package-lock.json\n"),
+                    lane_ignore("Drivers: a · b — relay.\n")],
+                   [["package.json", "package-lock.json"], []]))
+    checks.append(("an ignore entry covers what is beneath it",
+                   drop_ignored(["src/webview/chat.js", "src/runner.js"],
+                                ["src/webview/"]), ["src/runner.js"]))
+    checks.append(("…but never what is above it",
+                   drop_ignored(["src/"], ["src/webview/chat.js"]), ["src/"]))
 
     # …and on the REAL intra-plan graph, not just a toy one: every plan in this
     # project schedules every step exactly once. A vendored copy has no plans

@@ -44,6 +44,7 @@ Note: {{<=2 sentences of orientation. Never restate the step spec.}}
 
 ## Board — PLAN-01 (active)
 Drivers: {{name}} · {{name}} — relay.  {{INCLUDE ONLY IF several people drive this plan; OMIT ENTIRELY when solo}}
+Lane-ignore: package.json · package-lock.json  {{version-bump-only paths a split ignores; OMIT when solo}}
 Legend: ⬜ todo · 🔧 in progress · ✅ done · ⏸️ parked · ❌ dropped (see amendment) · 👤⬜/👤🔧/👤✅ owner-gated
 | Step | Title | M | Status | Done (date · sha7) |
 |---|---|---|---|---|
