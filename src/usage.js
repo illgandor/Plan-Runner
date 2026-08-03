@@ -308,14 +308,24 @@ class UsageService extends EventEmitter {
   // way, so being over is "any of them" — and being clear is therefore "all of them", which is
   // what makes a session reset NOT release a weekly hold. A null reading is never over (§Usage
   // snapshot null-safe rule): the gate pauses on a number, never on a missing one.
+  //
+  // P16-S04 (§Usage sources): a meter whose recorded reset time is already PAST is not over,
+  // whatever its percentage says — unknown-and-permissive, never zero. This is the S0124 fix: a
+  // 99% session that `/usage` kept reporting for 3.5 h after `resets Aug 2, 4:30am` held a run
+  // open with the right answer sitting in the same line. The margin is one poll cadence so a
+  // boundary tick cannot oscillate. A null reset time changes nothing, and dropping a row can
+  // only ever RELEASE a hold — no new pause is reachable from here.
   breaches(model) {
+    const cutoff = Date.now() - Math.max(10, this.pollSec) * 1000;
+    const expired = (at) => at != null && at < cutoff;
     const rows = [
-      { name: 'session', pct: this.session, limit: this.threshold },
-      { name: 'weekly', pct: this.week, limit: this.weekThreshold },
+      { name: 'session', pct: this.session, limit: this.threshold, resetsAt: this.sessionResetsAt },
+      { name: 'weekly', pct: this.week, limit: this.weekThreshold, resetsAt: this.weekResetsAt },
     ];
     if (usesModel(model, this.fableLabel))
-      rows.push({ name: `weekly ${this.fableLabel}`, pct: this.fable, limit: this.fableThreshold });
-    return rows.filter((r) => r.pct != null && r.limit != null && r.pct >= r.limit);
+      // No per-model reset clock exists in the `/usage` text, so this meter is never released early.
+      rows.push({ name: `weekly ${this.fableLabel}`, pct: this.fable, limit: this.fableThreshold, resetsAt: null });
+    return rows.filter((r) => r.pct != null && r.limit != null && r.pct >= r.limit && !expired(r.resetsAt));
   }
 
   // The gate StepRunner consults before starting a step and on every poll. `model` is the run's

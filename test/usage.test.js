@@ -299,6 +299,43 @@ test('a session reset does NOT release a weekly hold', async () => {
   assert.strictEqual(svc.isOverThreshold('opus[1m]'), false, 'released only when EVERY limit is under');
 });
 
+// P16-S04 — the S0124 fix. A stale 99% whose reset time has already passed must not hold a run.
+// Every case here is over-the-limit on the percentage: the ONLY variable is the reset clock, so
+// the assertions prove this change can release a hold and can never create one.
+test('a past reset time releases a hold; a future or absent one changes nothing', async () => {
+  const cfg = { threshold: 90, weekThreshold: 90, pollSec: 60 };
+  const MIN = 60000;
+
+  const future = await seeded({ session: 99, week: 10, sessionResetsAt: Date.now() + 42 * MIN }, cfg);
+  assert.strictEqual(future.isOverThreshold(), true, 'over + future reset → held, unchanged');
+
+  const past = await seeded({ session: 99, week: 10, sessionResetsAt: Date.now() - 29 * MIN }, cfg);
+  assert.strictEqual(past.isOverThreshold(), false, 'S0124 replay: 99% with a 29-min-past reset → NOT over');
+  assert.strictEqual(past.session, 99, 'the percentage is untouched — released, not zeroed');
+
+  const none = await seeded({ session: 99, week: 10 }, cfg);
+  assert.strictEqual(none.isOverThreshold(), true, 'over + null reset → held, exactly today’s behaviour');
+
+  // The margin: a reset that has only just ticked past must not flap the gate.
+  const edge = await seeded({ session: 99, week: 10, sessionResetsAt: Date.now() - 5000 }, cfg);
+  assert.strictEqual(edge.isOverThreshold(), true, 'inside the one-cadence margin → still held');
+
+  // Per-meter, like every other release: a spent session window cannot clear a live weekly hold.
+  const wk = await seeded({ session: 99, week: 95, sessionResetsAt: Date.now() - 3 * 3600e3 }, cfg);
+  assert.strictEqual(wk.isOverThreshold(), true, 'the weekly hold survives the session reset');
+  assert.match(wk.describe(), /^weekly usage 95% ≥ 90%$/, 'and only the weekly is named');
+});
+
+// No new pause is reachable through P16-S04 — asserted, not argued. A reset clock on a meter that
+// is UNDER its limit must leave it under, whichever side of `now` the clock falls.
+test('a reset time never pauses a meter that is under its limit', async () => {
+  const cfg = { threshold: 90, weekThreshold: 90, pollSec: 60 };
+  for (const at of [Date.now() - 3 * 3600e3, Date.now() + 3 * 3600e3, null]) {
+    const svc = await seeded({ session: 10, week: 10, sessionResetsAt: at, weekResetsAt: at }, cfg);
+    assert.strictEqual(svc.isOverThreshold('fable'), false, `under stays under (reset ${at})`);
+  }
+});
+
 // A Fable week at its limit is no reason to hold a run on a different model.
 test('the per-model weekly limit binds only a run using that model', async () => {
   const svc = await seeded({ session: 10, week: 10, fable: 99, fableLabel: 'Fable' },
