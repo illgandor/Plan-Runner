@@ -32,6 +32,55 @@ function parseUsageText(text) {
     fable: m ? +m[2] : null, fableLabel: m ? m[1].trim() : null };
 }
 
+// ---- Reset times (P16-S02, CONTRACTS §Usage sources) ------------------------------------
+// `/usage` prints the reset clock in the SAME line as the percentage — `Current session: 99%
+// used · resets Aug 2, 4:30am` — and it was thrown away. That is how a 3.5 h-stale 99% held a
+// run open long after the window had actually reset (S0124): the runner had the right answer
+// and read the wrong half. These regexes are deliberately SEPARATE from the percentage ones
+// above rather than an added group on them: the percentage parse must stay byte-identical
+// (D-072), so a reset clause that fails to match can never disturb a reading that works today.
+const SESSION_RESET_RE = /Current session:[^\n]*?resets\s+([^\n]+)/;
+const WEEK_RESET_RE = /Current week \(all models\):[^\n]*?resets\s+([^\n]+)/;
+const RESET_TIME_RE = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/;   // `4:30am` · `11pm`
+const RESET_DATE_RE = /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})/;
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+// `Aug 2, 4:30am (America/New_York)` → epoch ms. The text is a LOCAL clock reading with no
+// year, so it is built in local time (the zone the CLI names is the account's, which on this
+// box is the box's) and the year is inferred as whichever one lands nearest `now` — the only
+// thing that survives a Dec→Jan rollover. A shape this doesn't recognise returns null WITH the
+// percentage untouched: per §Usage sources a wrong timestamp is worse than none. A time in the
+// past is returned as-is — that is the S0124 signal, not an error to correct.
+function parseResetAt(text, now = Date.now()) {
+  const t = RESET_TIME_RE.exec(String(text || '').toLowerCase());
+  if (!t || +t[1] > 12) return null;
+  const min = t[2] ? +t[2] : 0;
+  const hour = (+t[1] % 12) + (t[3] === 'pm' ? 12 : 0);
+  if (min > 59) return null;
+  const base = new Date(now);
+  const d = RESET_DATE_RE.exec(String(text || '').toLowerCase());
+  const mon = d ? MONTHS.indexOf(d[1]) : base.getMonth();
+  const day = d ? +d[2] : base.getDate();
+  const out = new Date(base.getFullYear(), mon, day, hour, min);
+  // A date JS silently rolled over (Feb 31 → Mar 3) is a wrong timestamp, not a date.
+  if (out.getMonth() !== mon || out.getDate() !== day) return null;
+  const HALF_YEAR = 182 * 864e5;
+  if (out.getTime() - now > HALF_YEAR) out.setFullYear(out.getFullYear() - 1);
+  else if (now - out.getTime() > HALF_YEAR) out.setFullYear(out.getFullYear() + 1);
+  return out.getTime();
+}
+
+// Pure parse of a `/usage` result string → the two reset clocks, both nullable. Kept apart from
+// parseUsageText so the two halves of a line fail independently.
+function parseResets(text, now = Date.now()) {
+  const s = SESSION_RESET_RE.exec(text || '');
+  const w = WEEK_RESET_RE.exec(text || '');
+  return {
+    sessionResetsAt: s ? parseResetAt(s[1], now) : null,
+    weekResetsAt: w ? parseResetAt(w[1], now) : null,
+  };
+}
+
 // Each `claude -p /usage` spawns a throwaway Claude Code session that gets saved as a
 // transcript — polling every minute floods ~/.claude/projects (and the VS Code session
 // list) with hundreds of them. The JSON output carries the session_id, so delete that one
@@ -124,6 +173,7 @@ function defaultFetch({ timeoutMs = FETCH_TIMEOUT_MS, spawnFn = spawn, claudePat
         const j = JSON.parse(out);
         cleanupUsageSession(j.session_id); // don't leave a transcript behind for a free poll
         const parsed = parseUsageText(j.result || '');
+        Object.assign(parsed, parseResets(j.result || '')); // the other half of the same lines
         // The poll can succeed, parse, and still carry no percentages — `/usage` has been observed
         // answering with `/cost` output ("Total cost: $0.0000 …") instead of the subscription
         // report. That used to surface as a bare "unavailable this check", which says nothing and
@@ -162,6 +212,8 @@ class UsageService extends EventEmitter {
     this.fetch = fetch;
     this.session = null;
     this.week = null;
+    this.sessionResetsAt = null; // epoch ms; travels with its percentage, never last-good on its own
+    this.weekResetsAt = null;
     this.fable = null;
     this.fableLabel = 'Fable'; // replaced by whatever /usage names on the first reading
     this.max = null;
@@ -195,8 +247,11 @@ class UsageService extends EventEmitter {
       this.error = r.raw ? `usage unavailable this check — /usage answered: ${r.raw}`
         : 'usage unavailable this check';
     } else {
-      if (r.session != null) this.session = r.session;
-      if (r.week != null) this.week = r.week;
+      // A reset clock is bound to the reading that carried it: a good percentage whose line has
+      // no `resets …` clause clears it to null ("not known", which changes nothing) rather than
+      // keeping a clock from the PREVIOUS window, which would be a confidently wrong timestamp.
+      if (r.session != null) { this.session = r.session; this.sessionResetsAt = r.sessionResetsAt ?? null; }
+      if (r.week != null) { this.week = r.week; this.weekResetsAt = r.weekResetsAt ?? null; }
       // Same last-good rule for the model week. A poll is judged empty on session/week ONLY
       // (above) — an account that reports no per-model line is not a broken reading.
       if (r.fable != null) this.fable = r.fable;
@@ -214,6 +269,7 @@ class UsageService extends EventEmitter {
   // it in here would make one account-wide number mean different things in different windows.
   snapshot() {
     return { session: this.session, week: this.week, fable: this.fable, fableLabel: this.fableLabel,
+      sessionResetsAt: this.sessionResetsAt, weekResetsAt: this.weekResetsAt, // P16-S02: carried, read by nobody yet
       max: this.max, checked: this.checked, error: this.error, threshold: this.threshold,
       weekThreshold: this.weekThreshold, fableThreshold: this.fableThreshold, pollSec: this.pollSec };
   }
@@ -254,5 +310,6 @@ class UsageService extends EventEmitter {
 }
 
 module.exports = {
-  UsageService, defaultFetch, cleanupUsageSession, parseUsageText, spawnArgs, pollEnv, usesModel, FETCH_TIMEOUT_MS,
+  UsageService, defaultFetch, cleanupUsageSession, parseUsageText, parseResets, parseResetAt,
+  spawnArgs, pollEnv, usesModel, FETCH_TIMEOUT_MS,
 };

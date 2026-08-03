@@ -3,7 +3,8 @@
 // spends no Claude usage — fetch is faked, nothing spawns.
 const test = require('node:test');
 const assert = require('node:assert');
-const { UsageService, parseUsageText, spawnArgs, defaultFetch, pollEnv } = require('../src/usage');
+const { UsageService, parseUsageText, parseResets, parseResetAt, spawnArgs, defaultFetch,
+  pollEnv } = require('../src/usage');
 
 // Verbatim shape of a real `/usage` answer, including the per-model weekly line.
 const REAL = 'Current session: 42% used · resets Jul 27, 11pm (America/New_York)\n'
@@ -77,6 +78,76 @@ test('parseUsageText returns nulls for conversational text', () => {
   const empty = { session: null, week: null, fable: null, fableLabel: null };
   assert.deepStrictEqual(parseUsageText('I can help you with that!'), empty);
   assert.deepStrictEqual(parseUsageText(''), empty);
+});
+
+// ---- P16-S02: the reset clock the poll already receives ---------------------------------
+// A fixed "now" so every expectation below is a real local-time instant, not today's clock.
+const NOW = new Date(2026, 7, 2, 10, 0).getTime(); // Aug 2 2026, 10:00 local
+const at = (mon, day, h, m = 0) => new Date(2026, mon, day, h, m).getTime();
+
+test('parseResets reads both clocks off the real /usage sample', () => {
+  assert.deepStrictEqual(parseResets(REAL, NOW), {
+    sessionResetsAt: at(6, 27, 23),  // "Jul 27, 11pm (America/New_York)"
+    weekResetsAt: at(7, 1, 14),      // "Aug 1, 2pm (America/New_York)"
+  });
+  // …and the percentages are untouched by any of it — the two halves parse independently.
+  assert.deepStrictEqual(parseUsageText(REAL), { session: 42, week: 71, fable: 12, fableLabel: 'Fable' });
+});
+
+// The S0124 line verbatim: 99% was ~3.5 h stale while THIS half of the same line was correct
+// and already past. A reset in the past is returned as-is — it is the signal, not an error.
+test('parseResets keeps a reset time that has already passed', () => {
+  const r = parseResets('Current session: 99% used · resets Aug 2, 4:30am', NOW);
+  assert.strictEqual(r.sessionResetsAt, at(7, 2, 4, 30));
+  assert.ok(r.sessionResetsAt < NOW, 'the clock the stale percentage was contradicting');
+  assert.strictEqual(r.weekResetsAt, null, 'no weekly line in this sample');
+});
+
+test('a /usage line with no reset clause parses its percentage and reports no clock', () => {
+  const text = 'Current session: 5% used\nCurrent week (all models): 9% used';
+  assert.deepStrictEqual(parseResets(text, NOW), { sessionResetsAt: null, weekResetsAt: null });
+  assert.deepStrictEqual(parseUsageText(text), { session: 5, week: 9, fable: null, fableLabel: null });
+});
+
+// A wrong timestamp is worse than none (§Usage sources) — anything unrecognised is null, and
+// the percentage on the same line survives it intact.
+test('an unparseable reset clause is null, never a guess', () => {
+  for (const bad of ['soon', 'Feb 31, 4:30am', 'Aug 2, 25:99pm', 'Aug 2', '']) {
+    const text = `Current session: 42% used · resets ${bad}`;
+    assert.strictEqual(parseResets(text, NOW).sessionResetsAt, null, `"${bad}" must not parse`);
+    assert.strictEqual(parseUsageText(text).session, 42, `"${bad}" must not cost the percentage`);
+  }
+});
+
+// No year is printed, so a Dec reset read on Jan 1 must not land 11 months in the future.
+test('the year is inferred as the one nearest now, across a rollover', () => {
+  const jan = new Date(2027, 0, 1, 0, 30).getTime();
+  assert.strictEqual(parseResetAt('Dec 31, 11pm', jan), new Date(2026, 11, 31, 23).getTime());
+  assert.strictEqual(parseResetAt('Jan 1, 4am', jan), new Date(2027, 0, 1, 4).getTime());
+});
+
+test('snapshot carries both reset clocks, bound to the reading that supplied them', async () => {
+  const readings = [
+    { session: 42, week: 71, sessionResetsAt: at(7, 2, 16), weekResetsAt: at(7, 5, 9) },
+    { session: 44, week: 71 },                                   // next window, no clause
+  ];
+  const svc = new UsageService({ fetch: () => Promise.resolve(readings.shift()) });
+  await svc._tick(); svc.stop();
+  const s = svc.snapshot();
+  assert.strictEqual(s.sessionResetsAt, at(7, 2, 16));
+  assert.strictEqual(s.weekResetsAt, at(7, 5, 9));
+
+  await svc._tick(); svc.stop();
+  assert.strictEqual(svc.session, 44, 'the percentage still updates');
+  assert.strictEqual(svc.snapshot().sessionResetsAt, null, 'a stale clock is dropped, not carried');
+});
+
+test('a null poll leaves the reset clocks alone, like the percentages', async () => {
+  const readings = [{ session: 42, week: 71, sessionResetsAt: at(7, 2, 16) }, { session: null, week: null }];
+  const svc = new UsageService({ fetch: () => Promise.resolve(readings.shift()) });
+  await svc._tick(); svc.stop();
+  await svc._tick(); svc.stop();
+  assert.strictEqual(svc.snapshot().sessionResetsAt, at(7, 2, 16), 'last-good, same as session %');
 });
 
 test('a null poll keeps the prior snapshot and sets error', async () => {
