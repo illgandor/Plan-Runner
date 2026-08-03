@@ -65,7 +65,14 @@ PATH_SCAN_GLOBS = ["PROGRESS.md", "SESSION_PROMPT.md", "CLAUDE.md", "AGENTS.md",
 
 STEP_ID_RE = re.compile(r"P\d{2}-S\d{2}[ab]?")
 STEP_HEADING_RE = re.compile(r"^#### \[(P\d{2}-S\d{2}[ab]?)\]")
-NEXT_RE = re.compile(r"^NEXT: (P\d{2}-S\d{2}[ab]?\b|PLAN COMPLETE\b|none\b)")
+# The pointer grammar, shared with the runner's reader. The optional `[<lane>]` is the
+# lane-qualified form for a multi-driver project; a bare `NEXT:` is the solo form and is
+# unchanged. `WAIT <step-id>` says this lane is resting on another lane's step — like
+# PLAN COMPLETE / none it is a resting state, not a cursor into a plan.
+# Group 1 = the lane (None when bare) · group 2 = the target.
+NEXT_RE = re.compile(
+    r"^NEXT(?:\[([^\]]+)\])?: "
+    r"(P\d{2}-S\d{2}[ab]?\b|PLAN COMPLETE\b|none\b|WAIT P\d{2}-S\d{2}[ab]?\b)")
 SESSION_HEAD_RE = re.compile(r"^### (S\d{4}) ")
 PLAN_FILE_RE = re.compile(r"^PLAN-(\d{2})-[a-z0-9][a-z0-9-]*\.md$")
 SHARD_FILE_RE = re.compile(r"^SESSIONS-\d{4}-\d{4}\.md$")
@@ -195,7 +202,9 @@ def check_progress(root: Path):
 
     # ▶ NEXT STEP block
     s, e = section(lines, "▶ NEXT STEP")
-    next_id, plan_path = None, None
+    # One cursor per lane. A solo file has exactly one, unlaned — every rule below
+    # then reduces to the single-cursor behaviour it had before lanes existed.
+    next_ids, plan_path = [], None
     if s == -1:
         add("FAIL", "▶ NEXT STEP section", "missing")
     else:
@@ -203,12 +212,21 @@ def check_progress(root: Path):
         if len(block) > NEXT_BLOCK_MAX_LINES:
             add("FAIL", "▶ NEXT STEP block <= 6 lines",
                 f"{len(block)} lines — pointer only, never restate the step")
-        m = next((NEXT_RE.match(ln) for ln in block if NEXT_RE.match(ln)), None)
-        if not m:
+        ptrs = [m for m in (NEXT_RE.match(ln) for ln in block) if m]
+        lanes = {m.group(1) for m in ptrs}  # None = the bare, solo form
+        if not ptrs:
             add("FAIL", "▶ NEXT STEP pointer format",
-                'no line matching "NEXT: P##-S##[ab] | PLAN COMPLETE | none"')
-        elif m.group(1) not in ("PLAN COMPLETE", "none"):
-            next_id = m.group(1)
+                'no line matching "NEXT[<lane>]: P##-S##[ab] | PLAN COMPLETE | none'
+                ' | WAIT P##-S##"')
+        if None in lanes and len(lanes) > 1:
+            # The runner takes its own lane; the checker would validate all of them.
+            # Two readers, two answers — so the file is wrong, not merely untidy.
+            add("FAIL", "▶ NEXT STEP is laned or bare, never both",
+                f"a bare NEXT: alongside {sorted(l for l in lanes if l)}")
+        next_ids = [m.group(2) for m in ptrs
+                    if m.group(2) not in ("PLAN COMPLETE", "none")
+                    and not m.group(2).startswith("WAIT ")]
+        if next_ids:
             for ln in block:
                 if ln.startswith("Plan: "):
                     plan_path = root / ln[len("Plan: "):].strip()
@@ -216,12 +234,15 @@ def check_progress(root: Path):
                 add("FAIL", "▶ NEXT STEP names its plan file", 'no "Plan: <path>" line')
             elif not plan_path.exists():
                 add("FAIL", "▶ NEXT STEP plan file exists", str(plan_path))
-            elif not any(f"[{i}]" in read(plan_path)
-                         for i in (next_id, re.sub(r"[ab]$", "", next_id))):
-                # a split step (S03b) is legal without editing the immutable
-                # plan — its base ID (S03) must exist there instead
-                add("FAIL", "NEXT step exists in its plan file",
-                    f"[{next_id}] not found in {plan_path.name}")
+            else:
+                plan_text = read(plan_path)
+                for next_id in next_ids:
+                    # a split step (S03b) is legal without editing the immutable
+                    # plan — its base ID (S03) must exist there instead
+                    if not any(f"[{i}]" in plan_text
+                               for i in (next_id, re.sub(r"[ab]$", "", next_id))):
+                        add("FAIL", "NEXT step exists in its plan file",
+                            f"[{next_id}] not found in {plan_path.name}")
 
     # Session log
     s, e = section(lines, "Session log")
@@ -254,9 +275,13 @@ def check_progress(root: Path):
                             f"{SESSION_FIELD_MAX_CHARS} chars", f"{len(content)}")
                     if n == 0 and f == "Next":
                         newest_next = content
-        if next_id and newest_next and next_id not in STEP_ID_RE.findall(newest_next):
+        # Per lane: the newest entry belongs to whichever lane just closed a step, so
+        # ITS cursor must match. With one lane (solo) this is the old rule exactly.
+        if next_ids and newest_next and not any(
+                i in STEP_ID_RE.findall(newest_next) for i in next_ids):
             add("FAIL", "pointer coherence",
-                f"newest entry Next='{newest_next[:40]}' != ▶ NEXT STEP {next_id}")
+                f"newest entry Next='{newest_next[:40]}' names no lane's "
+                f"▶ NEXT STEP ({', '.join(next_ids)})")
 
     # Board ↔ plan parity
     active_nn = None
@@ -293,10 +318,11 @@ def check_progress(root: Path):
                 if orphan:
                     add("FAIL", "every board row is a plan step",
                         f"orphan rows {sorted(orphan)}")
-            if next_id and not next_id.startswith(f"P{active_nn}-"):
-                add("FAIL", "NEXT points into the active plan",
-                    f"{next_id} vs active PLAN-{active_nn}")
-    if active_nn is None and next_id is not None:
+            for next_id in next_ids:  # per lane — every lane runs the active plan
+                if not next_id.startswith(f"P{active_nn}-"):
+                    add("FAIL", "NEXT points into the active plan",
+                        f"{next_id} vs active PLAN-{active_nn}")
+    if active_nn is None and next_ids:
         add("WARN", "active board present", "NEXT names a step but no active board found")
 
     # Derived state — the board, the Dashboard count and the session log must
