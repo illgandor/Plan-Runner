@@ -6,6 +6,7 @@ master-plan skill. Run from the project root (or pass --root):
 
     python planning/tools/plan_check.py                 # check; exit 0 = pass
     python planning/tools/plan_check.py --update-hashes # record immutable-file hashes
+    python planning/tools/plan_check.py --lanes PLAN-12 # derived lane split; read-only
 
 Every budget here is the source of truth for the numbers quoted in
 planning/reference/CONVENTIONS.md and the master-plan skill docs.
@@ -39,8 +40,9 @@ STEP_MAX_LINES = 40
 PROMPT_MAX_BYTES = 3_584
 CLAUDE_WARN_BYTES = 8_192
 ARCHIVE_SHARD_MAX_ENTRIES = 25
+LANE_WIDTH = 2  # the N=2 assumption; wider schedules exist but are out of scope
 
-SESSION_FIELDS = ["Did", "Verified", "Decisions", "Handoff", "Next", "Notes"]
+SESSION_FIELDS =["Did", "Verified", "Decisions", "Handoff", "Next", "Notes"]
 STEP_FIELDS = ["**Objective:**", "**Context:**", "**Files:**", "**Approach:**",
                "**Completion criteria:**", "**Verify:**", "**Carryover:**"]
 STATUS_GLYPHS = {"⬜", "🔧", "✅", "⏸️", "⏸", "❌", "👤⬜", "👤🔧", "👤✅"}
@@ -215,6 +217,132 @@ def overlaps(a, b):
                for ta in a for tb in b)
 
 
+def step_block(lines, start, end):
+    """The block for the step heading at `start`: up to the next heading of ANY
+    level (## section, ### milestone), not just the next #### step, trailing
+    blanks trimmed. Research 02 §7 step 1 requires lane derivation to mirror this
+    slice exactly, so both callers share the one implementation."""
+    block = lines[start:end]
+    for j, bl in enumerate(block[1:], 1):
+        if bl.startswith(("## ", "### ")):
+            block = block[:j]
+            break
+    while block and not block[-1].strip():
+        block.pop()
+    return block
+
+
+def plan_steps(lines):
+    """[(step-id, intra-plan deps, footprint tokens)] in file order. A cross-plan
+    dep is dropped, not resolved: lanes are derived inside ONE plan (D-063), so a
+    dep on another plan is an already-satisfied constant."""
+    heads = [(i, STEP_HEADING_RE.match(ln)) for i, ln in enumerate(lines)
+             if ln.startswith("#### ")]
+    steps = [(i, mm.group(1)) for i, mm in heads if mm]
+    idxs = [i for i, _ in steps] + [len(lines)]
+    ids = {sid for _, sid in steps}
+    out = []
+    for n, (i, sid) in enumerate(steps):
+        dm = re.search(r"\[deps:\s*([^\]]*)\]", lines[i])
+        deps = [d for d in re.findall(r"P\d{2}-S\d{2}[ab]?", dm.group(1) if dm else "")
+                if d in ids]
+        block = step_block(lines, i, idxs[n + 1])
+        out.append((sid, deps, files_tokens(files_field(block))))
+    return out
+
+
+def ancestors(deps, _computed=None):
+    """Transitive closure of `deps` by memoised DFS — every node's set is
+    computed once and reused after (append-only `_computed` observes that, and
+    is how --selftest proves it). It terminates because the forward-dep FAIL
+    guarantees an acyclic intra-plan graph; the memo is seeded before recursing
+    so a hand-built cycle is merely finite rather than fatal."""
+    memo = {}
+
+    def anc(sid):
+        if sid in memo:
+            return memo[sid]
+        if _computed is not None:
+            _computed.append(sid)
+        memo[sid] = set()               # seeded first: a cycle stops here
+        acc = set()
+        for d in deps.get(sid, ()):
+            acc.add(d)
+            acc |= anc(d)
+        memo[sid] = acc
+        return acc
+
+    return {sid: anc(sid) for sid in deps}
+
+
+def concurrent(a, b, anc, foot):
+    """Research 02 §1's rule: neither step transitively depends on the other AND
+    their declared footprints are disjoint."""
+    return (a not in anc[b] and b not in anc[a]
+            and not overlaps(foot[a], foot[b]))
+
+
+def schedule(steps, width=LANE_WIDTH):
+    """Greedy rounds (research 02 §7 step 4): take every dep-ready step, seed the
+    round with the first, then add further ready steps while concurrent() holds
+    against all already picked and the round is under `width`. Greedy is NOT
+    optimal, so what this saves is a LOWER bound on the pairing available."""
+    deps = {sid: d for sid, d, _ in steps}
+    foot = {sid: f for sid, _, f in steps}
+    anc = ancestors(deps)
+    order = [sid for sid, _, _ in steps]
+    done, rounds = set(), []
+    while len(done) < len(order):
+        ready = [s for s in order if s not in done
+                 and all(d in done for d in deps[s])]
+        if not ready:
+            break                       # only a cycle gets here, and that FAILs
+        pick = [ready[0]]
+        for cand in ready[1:]:
+            if len(pick) >= width:
+                break
+            if all(concurrent(cand, p, anc, foot) for p in pick):
+                pick.append(cand)
+        rounds.append(pick)
+        done.update(pick)
+    return rounds
+
+
+def lanes(root: Path, want):
+    """--lanes PLAN-NN: print ONE plan's derived width-2 split and change nothing.
+    Read-only by construction (D-091) — it writes no file, records no hash, and
+    never touches the exit code of a normal checking run."""
+    nn = "".join(c for c in want if c.isdigit())
+    hits = sorted((root / "planning" / "plans").glob(f"PLAN-{nn}-*.md")) if nn else []
+    if not hits:
+        print(f"no plan file matches '{want}' in planning/plans/")
+        return 1
+    f = hits[0]
+    steps = plan_steps(read(f).splitlines())
+    if not steps:
+        print(f"{f.name}: no step headings to schedule")
+        return 1
+    rounds = schedule(steps)
+    saved = len(steps) - len(rounds)
+    print(f"{f.stem} — {len(steps)} steps -> {len(rounds)} rounds, {saved} saved")
+    for n, rd in enumerate(rounds, 1):
+        print(f"  {n:>2}  {' ‖ '.join(rd)}{'   <- fork' if len(rd) > 1 else ''}")
+    forks = [rd for rd in rounds if len(rd) > 1]
+    if not forks:
+        print("\nNo lanes here: every round is one step — a serial chain. That is a"
+              " normal\nanswer; about a third of plans cannot be split at all"
+              " (research 02 §3.4).")
+        return 0
+    print()
+    for rd in forks:
+        join = next((s for s, d, _ in steps if all(m in d for m in rd)), None)
+        print(f"fork {' ‖ '.join(rd)}"
+              + (f", rejoining at {join}" if join else ", never rejoined"))
+    print("Greedy and width 2, so `saved` is a LOWER bound, not the maximum. A fork"
+          "\nis mechanically safe, not necessarily a division of labour worth making.")
+    return 0
+
+
 def selftest():
     """--selftest: assert §1.1's five rows. This is the whole test strategy —
     there is no Python harness in this repo and planning/ is gitignored, so a
@@ -241,6 +369,25 @@ def selftest():
     checks.append(("leading dot kept", files_tokens("`.gitignore`"), [".gitignore"]))
     checks.append(("prose is not a path", is_path_token("the webview"), False))
     checks.append(("path token", is_path_token("src/runner.js"), True))
+
+    # ancestors: transitive, computed once per node, and finite even on a cycle
+    # the forward-dep FAIL would have caught first.
+    computed = []
+    anc = ancestors({"a": [], "b": ["a"], "c": ["b"], "d": ["c", "a"]}, computed)
+    checks.append(("ancestors transitive", anc["d"], {"a", "b", "c"}))
+    checks.append(("ancestors memoised", sorted(computed), ["a", "b", "c", "d"]))
+    checks.append(("ancestors terminates on a cycle",
+                   set(ancestors({"x": ["y"], "y": ["x"]})), {"x", "y"}))
+
+    # …and on the REAL intra-plan graph, not just a toy one: every plan in this
+    # project schedules every step exactly once. A vendored copy has no plans
+    # directory beside it and simply contributes no rows here.
+    pdir = Path("planning/plans")
+    for f in sorted(pdir.glob("PLAN-*.md")) if pdir.is_dir() else []:
+        real = plan_steps(read(f).splitlines())
+        checks.append((f"{f.name} schedules every step once",
+                       sorted(s for rd in schedule(real) for s in rd),
+                       sorted(s for s, _, _ in real)))
 
     bad = [c for c in checks if c[1] != c[2]]
     for label, got, want in bad:
@@ -584,16 +731,7 @@ def check_plans(root: Path, hashes, progress_text):
             if sid in seen_ids:
                 add("FAIL", "step IDs globally unique", f"{sid} in {f.name} and {seen_ids[sid]}")
             seen_ids[sid] = f.name
-            block = lines[i:idxs[n + 1]]
-            # a step block ends at the next heading of ANY level (## section,
-            # ### milestone), not just the next #### step heading
-            for j, bl in enumerate(block[1:], 1):
-                if bl.startswith(("## ", "### ")):
-                    block = block[:j]
-                    break
-            # trim trailing blanks from the block length count
-            while block and not block[-1].strip():
-                block.pop()
+            block = step_block(lines, i, idxs[n + 1])
             if len(block) > STEP_MAX_LINES:
                 add("FAIL", f"step {sid} <= {STEP_MAX_LINES} lines", f"{len(block)}")
             body = "\n".join(block)
@@ -799,12 +937,17 @@ def main():
                     help="record SHA-256 of SESSION_PROMPT.md + LOCKED/COMPLETE plans")
     ap.add_argument("--selftest", action="store_true",
                     help="assert the footprint-disjointness rows; exit 0 or 1")
+    ap.add_argument("--lanes", metavar="PLAN-NN",
+                    help="print one plan's derived width-2 lane split; read-only")
     args = ap.parse_args()
 
     if args.selftest:
         return selftest()
 
     root = Path(args.root).resolve()
+    if args.lanes:
+        return lanes(root, args.lanes)
+
     hpath = root / "planning" / "tools" / "plan-hashes.json"
 
     if args.update_hashes:
