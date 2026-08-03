@@ -114,6 +114,55 @@ def section(lines, heading_prefix):
     return (start, len(lines)) if start != -1 else (-1, -1)
 
 
+def files_field(block):
+    """A step's **Files:** value: the rest of its line plus any continuation
+    lines, ending at the next field, bullet or blank line."""
+    for j, ln in enumerate(block):
+        if ln.startswith("**Files:**"):
+            out = [ln[len("**Files:**"):]]
+            for nxt in block[j + 1:]:
+                if not nxt.strip() or nxt.startswith("**") or nxt.lstrip().startswith("- "):
+                    break
+                out.append(nxt)
+            return " ".join(out).strip()
+    return ""
+
+
+def files_tokens(field):
+    """Split a footprint on , ; · + and ' and ' — ONLY at parenthesis depth 0.
+    Without the depth guard `src/usage.js (new, ported)` splits mid-annotation
+    into phantom vague tokens; that single bug inflated the measured vagueness
+    rate of the corpus from 14% to 59% (research 02 §7). Tokens are normalised:
+    backticks and any trailing annotation/period dropped, NEVER a leading dot
+    (or `.gitignore` becomes the prose word `gitignore`)."""
+    toks, cur, depth, i = [], "", 0, 0
+    while i < len(field):
+        ch = field[i]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(0, depth - 1)
+        if depth == 0 and (ch in ",;·+" or field[i:i + 5] == " and "):
+            toks.append(cur)
+            cur, i = "", i + (5 if ch == " " else 1)
+            continue
+        cur += ch
+        i += 1
+    toks.append(cur)
+    out = []
+    for t in toks:
+        t = t.strip().strip("`").split("(")[0].strip().rstrip(".").strip()
+        if t:
+            out.append(t)
+    return out
+
+
+def is_path_token(t):
+    """A token counts as a path iff it has no whitespace and carries a '/' or a
+    file extension (research 02 §1.1). Everything else is prose."""
+    return not re.search(r"\s", t) and ("/" in t or bool(re.search(r"\.\w+$", t)))
+
+
 def check_line_lengths(path: Path, text, level):
     bad = [i + 1 for i, ln in enumerate(text.splitlines())
            if len(ln) > LINE_MAX_CHARS and "http" not in ln]
@@ -374,6 +423,21 @@ def check_plans(root: Path, hashes, progress_text):
             for lab in STEP_FIELDS:
                 if lab not in body:
                     add("FAIL", f"step {sid} has {lab}", "missing")
+            # Two advisory footprint WARNs — never FAIL. The corpus is already
+            # LOCKED and cannot be edited, so a FAIL would make every existing
+            # project permanently red. Lane derivation will later read **Files:**
+            # as a safety argument, so say now when it cannot be trusted.
+            field = files_field(block)
+            if not field or field.lower().startswith("n/a"):
+                if "[owner-gate: yes]" not in lines[i]:
+                    add("WARN", f"{f.name} step {sid} declares files",
+                        f"footprint is '{field[:30] or '(empty)'}' on an agent step —"
+                        " a step that touches no file is usually an unwritten field")
+            else:
+                for tok in files_tokens(field):
+                    if not is_path_token(tok):
+                        add("WARN", f"{f.name} step {sid} files parseable",
+                            f"'{tok[:50]}' is not a repo-relative path")
             for ln in block:
                 if ln.lstrip().startswith("- [ ]") and DOD_BANNED_RE.search(ln):
                     add("WARN", f"step {sid} DoD decidable",
