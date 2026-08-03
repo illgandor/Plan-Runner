@@ -187,6 +187,69 @@ def is_path_token(t):
     return not re.search(r"\s", t) and ("/" in t or bool(re.search(r"\.\w+$", t)))
 
 
+def tokens_touch(x, y):
+    """Two PATH tokens collide: equal, one containing the other at a '/'
+    boundary, or either glob's stem (cut at the first '*') prefixing the other.
+    A glob stem uses a raw prefix, not a boundary, so `src/web*` still collides
+    with src/webview/chat.js — the conservative direction."""
+    x, y = x.rstrip("/"), y.rstrip("/")
+    if "*" in x or "*" in y:
+        return y.startswith(x.split("*")[0]) or x.startswith(y.split("*")[0])
+    return x == y or y.startswith(x + "/") or x.startswith(y + "/")
+
+
+def overlaps(a, b):
+    """True when footprints `a` and `b` — token lists from files_tokens() — are
+    NOT provably disjoint. Research 02 §1.1's five rows: identical path,
+    directory containment, glob, vague token, empty footprint. The last two are
+    the safety half: an unprovable footprint must resolve to "conflicts", so the
+    failure mode is lost parallelism (INV-10, today's serial behaviour), never an
+    unsafe pairing. Bare filenames are deliberately NOT resolved against the repo
+    root — eight are unambiguous but `chat.css` is not (§F-3), and a silent
+    mis-resolve is the exact error this predicate exists to prevent.
+    Disjointness is necessary, NOT sufficient: semantic overlap is undetectable
+    by any footprint test (§F-5), so the gates stay the only net for that."""
+    if not a or not b:
+        return True
+    return any(not is_path_token(ta) or not is_path_token(tb) or tokens_touch(ta, tb)
+               for ta in a for tb in b)
+
+
+def selftest():
+    """--selftest: assert §1.1's five rows. This is the whole test strategy —
+    there is no Python harness in this repo and planning/ is gitignored, so a
+    test file beside the checker would not ship. One flag rides all five copies
+    of plan_check.py for free (A-P14-01)."""
+    checks = []
+    for label, a, b, want in [
+        ("identical path", ["src/runner.js"], ["src/runner.js"], True),
+        ("directory containment", ["src/webview/"], ["src/webview/chat.js"], True),
+        ("glob", ["test/*.test.js"], ["test/usage.test.js"], True),
+        ("vague token", ["src/session.js if needed"], ["src/runner.js"], True),
+        ("empty footprint", [], ["src/runner.js"], True),
+        ("disjoint files", ["src/runner.js"], ["src/usage.js"], False),
+        ("boundary, not substring", ["src/webview/chat.js"],
+         ["src/webview/chatty.js"], False),
+        ("glob stem is a raw prefix", ["src/web*"], ["src/webview/chat.js"], True),
+    ]:
+        checks.append((f"{label} (a,b)", overlaps(a, b), want))
+        checks.append((f"{label} (b,a)", overlaps(b, a), want))  # the rule is symmetric
+
+    # The parser half PLAN-14 already shipped — re-measured here, not rewritten.
+    checks.append(("depth-0 split", files_tokens("src/usage.js (new, ported) · src/runner.js"),
+                   ["src/usage.js", "src/runner.js"]))
+    checks.append(("leading dot kept", files_tokens("`.gitignore`"), [".gitignore"]))
+    checks.append(("prose is not a path", is_path_token("the webview"), False))
+    checks.append(("path token", is_path_token("src/runner.js"), True))
+
+    bad = [c for c in checks if c[1] != c[2]]
+    for label, got, want in bad:
+        print(f"FAIL | selftest | {label}: got {got!r}, want {want!r}")
+    print(f"{'FAIL' if bad else 'PASS'}: selftest {len(checks) - len(bad)}"
+          f"/{len(checks)} rows")
+    return 1 if bad else 0
+
+
 def check_line_lengths(path: Path, text, level):
     bad = [i + 1 for i, ln in enumerate(text.splitlines())
            if len(ln) > LINE_MAX_CHARS and "http" not in ln]
@@ -734,7 +797,13 @@ def main():
     ap.add_argument("--root", default=".", help="project root (default: cwd)")
     ap.add_argument("--update-hashes", action="store_true",
                     help="record SHA-256 of SESSION_PROMPT.md + LOCKED/COMPLETE plans")
+    ap.add_argument("--selftest", action="store_true",
+                    help="assert the footprint-disjointness rows; exit 0 or 1")
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest()
+
     root = Path(args.root).resolve()
     hpath = root / "planning" / "tools" / "plan-hashes.json"
 
