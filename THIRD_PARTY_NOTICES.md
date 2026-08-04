@@ -9,7 +9,7 @@ of the whole; the MIT terms below govern only the adapted material they name.
 
 ---
 
-## mattpocock/skills — `diagnosing-bugs`, `code-review`, `tdd`
+## mattpocock/skills — `diagnosing-bugs`, `code-review`, `tdd`, `wayfinder`
 
 - **Source:** https://github.com/mattpocock/skills
 - **Licence:** MIT
@@ -33,6 +33,16 @@ of the whole; the MIT terms below govern only the adapted material they name.
   at a seam nobody confirmed. Adapted (not copied verbatim) into this project's
   `master-plan` skill as the step template's optional `**Seam:**` field, which the checker
   never enforces (P22-S05, D-096), and shipped in the vendored copies under
+  `resources/skills/master-plan/` and `resources/skills-codex/master-plan/`.
+- **What was adapted (fourth skill):** the `wayfinder` skill's three-bucket scope model —
+  a Destination named first as the line every other bucket is measured against, a
+  "not yet specified" fog bucket that is never pre-sliced, an out-of-scope bucket that
+  never graduates, and the sharpness test that sorts the first two (can the question be
+  stated precisely now, not answered now). The CONCEPT only: none of wayfinder's
+  issue-tracker machinery — labels, native blocking edges, assignee-as-claim — was taken,
+  since this project deliberately has no tracker. Adapted (not copied verbatim) into this
+  project's `master-plan` skill at `references/conversion-rules.md` §Discovery plan
+  (P22-S06, D-098), and shipped in the vendored copies under
   `resources/skills/master-plan/` and `resources/skills-codex/master-plan/`.
 
 ```
