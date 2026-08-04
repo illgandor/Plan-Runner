@@ -9,7 +9,7 @@ of the whole; the MIT terms below govern only the adapted material they name.
 
 ---
 
-## mattpocock/skills — `diagnosing-bugs`
+## mattpocock/skills — `diagnosing-bugs`, `code-review`
 
 - **Source:** https://github.com/mattpocock/skills
 - **Licence:** MIT
@@ -20,6 +20,13 @@ of the whole; the MIT terms below govern only the adapted material they name.
   skill as the Phase-1 rule that governs the runner's `diagnosing` state (P22-S03,
   D-094), and shipped in the vendored copies under `resources/skills/next-step/` and
   `resources/skills-codex/next-step/`.
+- **What was adapted (second skill):** the `code-review` skill's Standards review axis —
+  reviewing code against a repo's own documented standards as a separate axis from the
+  spec review, never merged with it, with Fowler's first twelve code smells carried as
+  the baseline for a repo that documents nothing, each smell a labelled judgement call
+  rather than a hard violation. Adapted (not copied verbatim) into the same `next-step`
+  skill as the close-out Standards axis, mandatory on risky step classes (P22-S04,
+  D-095).
 
 ```
 MIT License
