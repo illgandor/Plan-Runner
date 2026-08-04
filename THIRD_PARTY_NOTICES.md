@@ -9,7 +9,7 @@ of the whole; the MIT terms below govern only the adapted material they name.
 
 ---
 
-## mattpocock/skills — `diagnosing-bugs`, `code-review`
+## mattpocock/skills — `diagnosing-bugs`, `code-review`, `tdd`
 
 - **Source:** https://github.com/mattpocock/skills
 - **Licence:** MIT
@@ -27,6 +27,13 @@ of the whole; the MIT terms below govern only the adapted material they name.
   rather than a hard violation. Adapted (not copied verbatim) into the same `next-step`
   skill as the close-out Standards axis, mandatory on risky step classes (P22-S04,
   D-095).
+- **What was adapted (third skill):** the `tdd` skill's named-seam rule — that the public
+  boundary a test attaches to is agreed BEFORE the code is written, that a seam is where
+  behaviour is observed without reaching inside the unit, and that no test may be written
+  at a seam nobody confirmed. Adapted (not copied verbatim) into this project's
+  `master-plan` skill as the step template's optional `**Seam:**` field, which the checker
+  never enforces (P22-S05, D-096), and shipped in the vendored copies under
+  `resources/skills/master-plan/` and `resources/skills-codex/master-plan/`.
 
 ```
 MIT License
