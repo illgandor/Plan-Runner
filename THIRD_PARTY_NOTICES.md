@@ -11,6 +11,12 @@ of the whole; the MIT terms below govern only the adapted material they name.
 
 ## mattpocock/skills — `diagnosing-bugs`, `code-review`, `tdd`, `wayfinder`
 
+> **Status at this HEAD (P23-S04, F-22):** all four adaptations below are authored, ruled and
+> attributed, but none is yet pasted into the skill masters or their vendored copies under
+> `resources/skills*/` — that paste is an owner action, still open (OWNER_TODO P22-S03b–S06b).
+> The MIT obligation is met regardless: this file names the source, the licence, and what was
+> adapted. Nothing below waits on the paste to be true.
+
 - **Source:** https://github.com/mattpocock/skills
 - **Licence:** MIT
 - **What was adapted:** the `diagnosing-bugs` skill's central method — that a debugging
@@ -18,8 +24,7 @@ of the whole; the MIT terms below govern only the adapted material they name.
   agent-runnable reproduction command has actually been run, plus the artifact sections
   that method fills in. Adapted (not copied verbatim) into this project's `next-step`
   skill as the Phase-1 rule that governs the runner's `diagnosing` state (P22-S03,
-  D-094), and shipped in the vendored copies under `resources/skills/next-step/` and
-  `resources/skills-codex/next-step/`.
+  D-094).
 - **What was adapted (second skill):** the `code-review` skill's Standards review axis —
   reviewing code against a repo's own documented standards as a separate axis from the
   spec review, never merged with it, with Fowler's first twelve code smells carried as
@@ -32,8 +37,7 @@ of the whole; the MIT terms below govern only the adapted material they name.
   behaviour is observed without reaching inside the unit, and that no test may be written
   at a seam nobody confirmed. Adapted (not copied verbatim) into this project's
   `master-plan` skill as the step template's optional `**Seam:**` field, which the checker
-  never enforces (P22-S05, D-096), and shipped in the vendored copies under
-  `resources/skills/master-plan/` and `resources/skills-codex/master-plan/`.
+  never enforces (P22-S05, D-096).
 - **What was adapted (fourth skill):** the `wayfinder` skill's three-bucket scope model —
   a Destination named first as the line every other bucket is measured against, a
   "not yet specified" fog bucket that is never pre-sliced, an out-of-scope bucket that
@@ -42,8 +46,7 @@ of the whole; the MIT terms below govern only the adapted material they name.
   issue-tracker machinery — labels, native blocking edges, assignee-as-claim — was taken,
   since this project deliberately has no tracker. Adapted (not copied verbatim) into this
   project's `master-plan` skill at `references/conversion-rules.md` §Discovery plan
-  (P22-S06, D-098), and shipped in the vendored copies under
-  `resources/skills/master-plan/` and `resources/skills-codex/master-plan/`.
+  (P22-S06, D-098).
 
 ```
 MIT License
