@@ -226,7 +226,7 @@ function usageConfig() {
     fableThreshold: c.get('pauseFableThresholdPct', 90),              // weekly per-model %, model-scoped
     pollSec: c.get('usagePollSeconds', 60), finalizeSec: c.get('finalizeQuietSeconds', 120) };
 }
-// §In-extension UI — the six planRunner.* keys the ⚙ popover reads/writes, with the
+// §In-extension UI — the ten planRunner.* keys the ⚙ popover reads/writes, with the
 // package.json contribution bounds (host clamps writes to these). stopAtTime = "HH:MM"|"".
 const SETTING_SPEC = {
   pauseThresholdPct: { min: 10, max: 100, def: 90 },
