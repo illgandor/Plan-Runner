@@ -23,6 +23,7 @@ const { STEP_PROMPT, CODEX_STEP_SUFFIX, MASTER_PLAN_PROMPT } = require('./consta
 const { readPointer, isLaned } = require('./progress');
 const session = require('./session');
 const engine = require('./engine');
+const adaptive = require('./adaptive');
 
 // Handoff guard between steps: a step is only closed out if its work is COMMITTED and (when
 // there's an upstream) PUSHED — the next-step skill does both at close-out. If the tree is
@@ -273,6 +274,7 @@ class Runner extends EventEmitter {
     this.readLedger = readLedger;     // ledger reader feeding stuckSignal; overridable in tests
     this.headSha = headSha;           // base commit of a step attempt; overridable in tests
     this.openDiagnostic = openDiagnostic; // diagnosis artifact writer; overridable in tests
+    this._adaptive = null;       // the current step's {tags, model, effort} when its heading is tagged (P24-S04)
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -347,6 +349,7 @@ class Runner extends EventEmitter {
     this._planSession = false;
     this._advancedPlan = false;
     this.currentStep = null;
+    this._adaptive = null;
     this.emit('status', { state, detail });
     this.emit('done', { state, detail, startedAtMs: this._startedAtMs }); // sinceMs for the run digest (P09-S16)
   }
@@ -360,13 +363,38 @@ class Runner extends EventEmitter {
   // so that limit simply never matches there.)
   // Codex's ONLY release from a hold is the reset clock (S04): there is no active query to fall
   // back on, so if that regresses Codex deadlocks where Claude would not.
-  _over() { return !!(this.usageGate && this.usageGate.isOverThreshold(this.project.model)); }
+  _over() { return !!(this.usageGate && this.usageGate.isOverThreshold(this.gateModel())); }
+
+  // D-107: the gate (and the panel's per-model bar) is asked about the model the CURRENT step runs
+  // on — its tag when adaptive, else the dropdown's exactly as before.
+  gateModel() { return this._adaptive ? this._adaptive.model : this.project.model; }
+
+  // The ONE place a session's {model, effort} comes from — _startSession and answer() alike.
+  _modelEffort() {
+    return this._adaptive ? { model: this._adaptive.model, effort: this._adaptive.effort }
+      : { model: this.project.model, effort: this.project.effort };
+  }
+
+  // A tagged heading → its resolved pair, started at the tier the ledger says it already reached
+  // (a restart resumes there, not back at its tag). Untagged / unreadable → null = the dropdown.
+  _readAdaptive(stepId) {
+    let tags = adaptive.stepTags(this.project.path, stepId);
+    if (!tags) return null;
+    const eng = this.project.engine || 'claude';
+    const reached = tags.ownerGate ? null : adaptive.reachedTier(this.readLedger(this.project.path), stepId);
+    while (reached && adaptive.TIERS.indexOf(tags.model) < adaptive.TIERS.indexOf(reached)) {
+      const up = adaptive.stepUp(tags, eng);
+      if (!up) break;
+      tags = up;
+    }
+    return { tags, ...adaptive.resolve(tags, eng) };
+  }
 
   // Which limit is holding the run, named. A weekly hold can last days where a session hold lasts
   // hours, so "usage at/above threshold" alone doesn't say what you're waiting on. Optional on the
   // gate: an older/stub gate without describe() falls back to the generic line.
   _gateWhy() {
-    const d = this.usageGate && this.usageGate.describe && this.usageGate.describe(this.project.model);
+    const d = this.usageGate && this.usageGate.describe && this.usageGate.describe(this.gateModel());
     return d || 'account usage at/above threshold';
   }
 
@@ -406,7 +434,8 @@ class Runner extends EventEmitter {
     if (!next) return this._finish('error', 'No NEXT pointer / PROGRESS.md — not a master-plan project');
     if (/^none/i.test(next)) return this._finish('done', `Project complete (${next})`);
     // Join wait / relay stop (research 06 §5.1–5.4): the wait is WRITTEN into the pointer, never
-    // derived — the runner has never parsed a plan file and must not start. One branch covers both
+    // derived — the runner reads no plan file to find it (its only plan read is the step's heading
+    // tags, below — D-106) and must not start. One branch covers both
     // shapes. It ENDS the run (§5.2): nothing here polls, sleeps or parks — the lane's existing idle
     // heartbeat, outside this file, is what notices the wait clearing.
     const wait = /^WAIT\s+(\S+)/i.exec(next);
@@ -416,11 +445,13 @@ class Runner extends EventEmitter {
     // pointer. If master-plan already ran and the pointer is still PLAN COMPLETE (unchanged),
     // finish rather than loop. A pointer that names a step resets the guard (see _runStep).
     if (/^PLAN COMPLETE/i.test(next)) {
+      this._adaptive = null; // the master-plan session always runs on the dropdown
       if (this._advancedPlan) return this._finish('done', `Plan complete (${next})`);
       this._advancedPlan = true;
       this._retries = 0; // fresh close-out → fresh error-retry budget (retries re-enter _runMasterPlan directly)
       return this._runMasterPlan();
     }
+    this._adaptive = this._readAdaptive(next); // before the gate, so it asks about THIS step's model
     // Proactive gate: don't START a step while account usage is at/above threshold (port app gate).
     if (this._over()) {
       this.currentStep = next;
@@ -497,7 +528,8 @@ class Runner extends EventEmitter {
     const sig = this._diagnose(stepId);
     this.emit('status', sig
       ? { state: 'diagnosing', step: stepId, detail: `${stepId} looks stuck (${sig.reason}) — ${sig.detail}` }
-      : { state: 'running', step: stepId, detail: `Running ${stepId}` });
+      : { state: 'running', step: stepId, detail: `Running ${stepId}` + (this._adaptive
+        ? ` · ${this._adaptive.tags.model} / ${this._adaptive.effort} (adaptive)` : '') });
     this.emit('step-started', { step: stepId });
     this._startSession(stepId, this._stepPrompt(), null);
   }
@@ -539,7 +571,7 @@ class Runner extends EventEmitter {
     const gen = ++this._gen;
     this.currentStep = stepId;
     this._turnLive = true;
-    const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode, maxTurns: this.project.maxTurns };
+    const options = { ...this._modelEffort(), permissionMode: this.project.mode, maxTurns: this.project.maxTurns };
     if (resumeId) options.resume = resumeId;
     this._provider.start({ id: this.id, cwd: this.project.path, prompt, options }, { send: this._wrapSend(stepId, gen) });
   }
@@ -634,14 +666,15 @@ class Runner extends EventEmitter {
     this.appendLedger(this.project.path, {
       stepId,
       engine: this.project.engine || 'claude',
-      model: this.project.model,
-      effort: this.project.effort,
+      ...this._modelEffort(),
       startedAt: new Date(this._stepStartedAtMs || this.now()).toISOString(),
       endedAt: new Date(this.now()).toISOString(),
       numTurns: r.numTurns != null ? r.numTurns : null,
       tokens,
       costUsd: r.costUsd != null ? r.costUsd : null,
       outcome: 'done',
+      // Adaptive steps only (A-P24-01): an untagged record stays byte-identical; absent = false / 0.
+      ...(this._adaptive ? { adaptive: true, escalations: 0 } : {}),
     });
   }
 
@@ -801,7 +834,7 @@ class Runner extends EventEmitter {
     this._turnLive = true;
     const stepId = this.currentStep;
     this.emit('status', { state: 'running', step: stepId, detail: `Continuing ${stepId}…` });
-    const options = { model: this.project.model, effort: this.project.effort, permissionMode: this.project.mode,
+    const options = { ...this._modelEffort(), permissionMode: this.project.mode,
       maxTurns: this.project.maxTurns, resume: this._provider.currentSessionId(this.id) || undefined };
     this._provider.chat({ id: this.id, cwd: this.project.path, prompt: text, options }, { send: this._wrapSend(stepId, this._gen) });
   }

@@ -252,7 +252,8 @@ function postSettings() {
 // the same scoping the gate applies (a Fable week never holds an Opus run).
 function postUsage(s) { post({ kind: 'usage', engine: state.engine, session: s.session, week: s.week,
   fable: s.fable, fableLabel: s.fableLabel, max: s.max, threshold: s.threshold,
-  weekThreshold: s.weekThreshold, fableThreshold: s.fableThreshold, model: effectiveModel(),
+  weekThreshold: s.weekThreshold, fableThreshold: s.fableThreshold,
+  model: runner && runner.running ? runner.gateModel() : effectiveModel(), // D-107: the live step's model
   paused: !!(runner && runner.paused), error: s.error, checked: s.checked,
   // P16-S03: the clock is formatted HERE (usage.js resetText, pure + tested) so the panel only
   // paints a string it is given and decides nothing — '' when there is no clock to show.
