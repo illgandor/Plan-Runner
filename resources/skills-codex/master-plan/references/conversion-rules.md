@@ -198,6 +198,40 @@ The owner declining is a normal answer — record it in Facts and convert.
   and it is not hash-locked. Stamp it
   `> DRAFT SCOPE — input to master-plan NEW-PLAN. Not a spec; do not execute.`
 
+### Scope — three buckets, Destination first
+
+A Discovery plan's real output is a *sorted* frontier: every question about the
+project sits in exactly one of three buckets. Name them in this order, because
+each one is measured against the one before it.
+
+- **Destination** — the state the project is trying to reach, written first and
+  in one paragraph. Not a step list and not a schedule: it is the line every
+  other bucket is measured against. Without it "out of scope" has nothing to
+  mean, so a Discovery plan that has not written its Destination has not started.
+- **Not yet specified** — real work, inside the Destination, that nobody can
+  state precisely yet. This is the fog. It stays one line of intent and is never
+  pre-sliced into steps; slicing fog only produces steps that describe a guess.
+- **Out of scope** — work ruled out. Closed with one line saying why, and it
+  never graduates.
+
+**The sharpness test** decides between the first two, and it is about
+statability, not answerability:
+
+> Can the question be stated precisely NOW? Not: can it be answered now.
+
+Sharp enough to state becomes a step **even if it is blocked** — being blocked is
+a schedule fact, not a fog fact. Not sharp enough to state stays fog, whatever
+anyone suspects the answer is. Keeping those two apart is the whole point: it is
+what stops fog from being pre-sliced into confident-looking steps nobody can
+write a Verify for.
+
+**Out of scope is a SCOPE call, not a sharpness call.** Work lands there because
+it falls outside the Destination, never because it is vague — a vague in-scope
+question is fog, not exclusion. And it does not come back: the frontier stops at
+the Destination, so a ruled-out item is closed with its one-line reason instead
+of being left as a dormant step that later sessions re-litigate. Reopening one
+means moving the Destination, which is a fresh owner ruling.
+
 ### Close-out
 
 PLAN-00 closes by the ordinary §Plan-close ritual. It does NOT convert its own

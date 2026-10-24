@@ -257,6 +257,14 @@ boilerplate is banned here — it lives once in planning/reference/CONVENTIONS.m
 **Context:** {{<=3 bullets of pointers (reference §, contract §, prior step IDs).
 Pointers only — restated content is a check failure.}}
 **Files:** {{exact paths to create/modify, or `n/a — <reason>` — never omitted.}}
+**Seam:** {{OPTIONAL — omit the whole line when there is none. The public
+boundary this step's tests attach to: an exported function, a CLI command, an
+HTTP route, a file the step writes. A seam is where behaviour is observed
+WITHOUT reaching inside, so an internal helper, a private field, or a mock of
+one is NOT a seam. Agree it HERE, before the step runs — no test may be
+written at an unconfirmed seam, and a seam discovered mid-step by whatever
+was easiest to mock was never agreed. Absence is silence: the checker never
+WARNs and never FAILs on a missing Seam, and no LOCKED plan is retrofitted.}}
 **Approach:**
 - {{3–10 implementation bullets: exact enough to start cold, loose enough to adapt}}
 **Completion criteria:**

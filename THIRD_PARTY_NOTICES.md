@@ -11,11 +11,9 @@ of the whole; the MIT terms below govern only the adapted material they name.
 
 ## mattpocock/skills — `diagnosing-bugs`, `code-review`, `tdd`, `wayfinder`
 
-> **Status at this HEAD (P23-S04, F-22):** all four adaptations below are authored, ruled and
-> attributed, but none is yet pasted into the skill masters or their vendored copies under
-> `resources/skills*/` — that paste is an owner action, still open (OWNER_TODO P22-S03b–S06b).
-> The MIT obligation is met regardless: this file names the source, the licence, and what was
-> adapted. Nothing below waits on the paste to be true.
+> **Status (P24-S02):** all four adaptations below ship in both skill trees — the `next-step`
+> and `master-plan` masters and their vendored copies under `resources/skills*/`. The first two
+> landed in P24-S01, the last two in P24-S02.
 
 - **Source:** https://github.com/mattpocock/skills
 - **Licence:** MIT
