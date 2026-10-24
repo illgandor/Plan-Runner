@@ -274,7 +274,8 @@ class Runner extends EventEmitter {
     this.readLedger = readLedger;     // ledger reader feeding stuckSignal; overridable in tests
     this.headSha = headSha;           // base commit of a step attempt; overridable in tests
     this.openDiagnostic = openDiagnostic; // diagnosis artifact writer; overridable in tests
-    this._adaptive = null;       // the current step's {tags, model, effort} when its heading is tagged (P24-S04)
+    this._adaptive = null;       // the current step's {tags, model, effort, escalations} when tagged (P24-S04/S05)
+    this._lastText = '';         // the turn's last assistant text — where a `NEEDS OWNER:` line lands (P24-S05)
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -381,13 +382,34 @@ class Runner extends EventEmitter {
     let tags = adaptive.stepTags(this.project.path, stepId);
     if (!tags) return null;
     const eng = this.project.engine || 'claude';
-    const reached = tags.ownerGate ? null : adaptive.reachedTier(this.readLedger(this.project.path), stepId);
+    const records = tags.ownerGate ? [] : this.readLedger(this.project.path);
+    const reached = adaptive.reachedTier(records, stepId);
     while (reached && adaptive.TIERS.indexOf(tags.model) < adaptive.TIERS.indexOf(reached)) {
       const up = adaptive.stepUp(tags, eng);
       if (!up) break;
       tags = up;
     }
-    return { tags, ...adaptive.resolve(tags, eng) };
+    // escalations counts this step's records already in the ledger, so a restart's done record is honest.
+    const escalations = records.filter((r) => r && r.kind === 'escalation' && r.stepId === stepId).length;
+    return { tags, ...adaptive.resolve(tags, eng), escalations };
+  }
+
+  // Step up one tier (D-105, §Adaptive effort "The three triggers"). Adaptive, non-owner-gated steps
+  // only — PLAN COMPLETE and default mode have no _adaptive, so they never get here. Writes the
+  // escalation record, swaps the step's pair (the gate sees the new model at once) and says so.
+  // false = top tier / not adaptive / owner-gated → the caller falls through to today's behaviour.
+  _stepUp(stepId, reason) {
+    const a = this._adaptive;
+    if (!a || a.tags.ownerGate) return false;
+    const eng = this.project.engine || 'claude';
+    const up = adaptive.stepUp(a.tags, eng);
+    if (!up) return false;
+    this.appendLedger(this.project.path,
+      adaptive.escalationRecord(stepId, a.tags.model, up.model, reason, new Date(this.now()).toISOString()));
+    this._adaptive = { tags: up, ...adaptive.resolve(up, eng), escalations: a.escalations + 1 };
+    this.emit('status', { state: 'running', step: stepId,
+      detail: `${stepId} did not finish on ${a.tags.model} — stepping up to ${up.model}` });
+    return true;
   }
 
   // Which limit is holding the run, named. A weekly hold can last days where a session hold lasts
@@ -526,6 +548,7 @@ class Runner extends EventEmitter {
     this._stepStartedAtMs = this.now(); // true step start (retries reuse it, so the ledger spans them)
     this._lastResult = null;
     const sig = this._diagnose(stepId);
+    if (sig) this._stepUp(stepId, 'stuck'); // trigger 3: once, before the session starts
     this.emit('status', sig
       ? { state: 'diagnosing', step: stepId, detail: `${stepId} looks stuck (${sig.reason}) — ${sig.detail}` }
       : { state: 'running', step: stepId, detail: `Running ${stepId}` + (this._adaptive
@@ -571,6 +594,7 @@ class Runner extends EventEmitter {
     const gen = ++this._gen;
     this.currentStep = stepId;
     this._turnLive = true;
+    this._lastText = '';
     const options = { ...this._modelEffort(), permissionMode: this.project.mode, maxTurns: this.project.maxTurns };
     if (resumeId) options.resume = resumeId;
     this._provider.start({ id: this.id, cwd: this.project.path, prompt, options }, { send: this._wrapSend(stepId, gen) });
@@ -589,6 +613,7 @@ class Runner extends EventEmitter {
       // can never re-arm the stall watchdog and mask a genuinely silent turn (P16-S05).
       if (t === 'rate-limit') return this._recordUsageEvent(payload.msg);
       if (t === 'result') this._lastResult = payload.msg; // keep for the run ledger at step-done
+      if (t === 'assistant-text') this._lastText = payload.msg.text || '';
       if (t === 'result' || t === 'error') return this._onTurnEnd(stepId, gen, t === 'error');
       if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
       if (this._turnLive) this._armStall(stepId, gen);     // live-turn activity → (re)arm the stall watchdog
@@ -651,11 +676,30 @@ class Runner extends EventEmitter {
     // Pointer unchanged. A clean result = Claude is waiting on you. An error tore the session
     // down — retry the step in a fresh session up to the bound before dropping to needs-you.
     if (isError && this._retries < MAX_RETRIES) return this._retryStep(stepId);
+    // Adaptive steps step up one tier before stopping (P24-S05). Errored with the budget spent → a
+    // FRESH session on the new tier, budget reset. Clean end that never asked for the owner → RESUME
+    // the same session on the new tier with ESCALATE_PROMPT. Top tier falls through to needs-you.
+    if (isError && this._stepUp(stepId, 'errored')) {
+      this._retries = 0;
+      return this._startSession(stepId, this._stepPrompt(), null);
+    }
+    if (!isError && !this._needsOwner() && this._stepUp(stepId, 'unfinished')) {
+      const id = this._provider.currentSessionId(this.id);
+      this._provider.stop(this.id);
+      return this._startSession(stepId, adaptive.ESCALATE_PROMPT, id);
+    }
     this.needsYou = true;
     const detail = isError
       ? `${stepId}: errored (retried ${this._retries}×) — answer in the panel to continue, or Stop`
       : `${stepId}: waiting on you — answer in the panel`;
     this.emit('status', { state: 'needs-you', step: stepId, detail });
+  }
+
+  // A line starting `NEEDS OWNER:` in the turn's final text is never escalated (§Adaptive effort).
+  // Claude carries it in the result text; Codex's result has none, so the last assistant text too.
+  _needsOwner() {
+    return /^NEEDS OWNER:/m.test(`${(this._lastResult && this._lastResult.text) || ''}
+${this._lastText}`);
   }
 
   // Append one run-ledger record for a completed step (§Result event + run ledger, D-017).
@@ -674,7 +718,7 @@ class Runner extends EventEmitter {
       costUsd: r.costUsd != null ? r.costUsd : null,
       outcome: 'done',
       // Adaptive steps only (A-P24-01): an untagged record stays byte-identical; absent = false / 0.
-      ...(this._adaptive ? { adaptive: true, escalations: 0 } : {}),
+      ...(this._adaptive ? { adaptive: true, escalations: this._adaptive.escalations } : {}),
     });
   }
 
@@ -832,6 +876,7 @@ class Runner extends EventEmitter {
       this.emit('resumed', {});
     }
     this._turnLive = true;
+    this._lastText = '';
     const stepId = this.currentStep;
     this.emit('status', { state: 'running', step: stepId, detail: `Continuing ${stepId}…` });
     const options = { ...this._modelEffort(), permissionMode: this.project.mode,
