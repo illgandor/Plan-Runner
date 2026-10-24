@@ -18,7 +18,7 @@ metadata:
   mirrored_from: master-plan
   source_sha: 61315aafc495a5e758cbbbeb6ccd0b7f2fc810805322cf2f65cf14a7bdfdd4bb
   twin_sha: 68628de37aedb95515c766dce973d9dee2f262506784586f38d0c2bc519fdf94
-  synced: 2026-08-03
+  synced: 2026-10-23
 ---
 
 # Master Plan — standardized planning system

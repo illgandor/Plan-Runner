@@ -17,7 +17,7 @@ metadata:
   mirrored_from: next-step
   source_sha: 5ffc1792225c59eb8372a629971324e9b8b23d6951808df5a42de5557bdf0327
   twin_sha: c314da47dbe4220fd881d594b449f2df57af8b9b23285f816d07c6cbfc46db76
-  synced: 2026-08-03
+  synced: 2026-10-23
 ---
 
 # Next Step — execute one master-plan step
@@ -102,9 +102,100 @@ Satisfy every Completion-criteria box and the Verify command — no more, no les
    upstream set → skip, and say so in the session entry's Handoff so the owner
    can publish the branch deliberately.
 
+## Close-out review — two axes, never merged
+Close-out reviews the step's own code on TWO axes, run separately and reported
+side by side under their own headings in the close-out summary:
+- **Spec** — does it do what the step said? Every Completion-criteria box and the
+  Verify command; nothing invented, nothing quietly dropped.
+- **Standards** — does it follow THIS repo's standards, whatever the spec said?
+
+**Never merge the two, and never rerank one against the other.** They answer
+different questions and either can be clean while the other is wrecked: code can
+follow every convention and implement the wrong thing, or match the spec exactly
+and trash the conventions. Merged into one ranked list, the healthy axis dilutes
+the sick one and the reader learns to skim both. Report both even when one is
+empty — "Standards: nothing" is a result, not a blank.
+
+**The Standards axis is MANDATORY when the step is risky.** Risk is DERIVED from
+the fields the step already has — it is never declared, and it adds no new step
+field. A step is risky when its `**Files:**` touch any of:
+- **release or packaging** — CI workflows, `package.json`/lockfile, version or
+  tag, publish scripts, vendored copies;
+- **auth, secrets or tokens**;
+- **payments or money**;
+- **schema or data migrations**;
+- **destructive paths** — delete, reset, force-push, overwrite, `rm -rf`;
+or when the step is `[owner-gate: yes]` — a human is being asked to trust it.
+On any other step the axis is optional: run it when it is cheap, skip it when it
+is not. Mandatory means mandatory; optional means genuinely optional.
+
+**Skip anything tooling already enforces.** If lint, the formatter, the type
+checker or `plan_check.py` would have caught it, it is not a review finding. A
+review that re-reports lint output trains the reader to ignore it.
+
+Findings that are real but outside this step go to OWNER_TODO or the next plan —
+never silently into the code, which would make the step exceed its own spec.
+
+### What "this repo's standards" means
+Two rules bind, and they bind in this order:
+1. **A documented repo standard overrides the baseline below.** `CLAUDE.md`,
+   `planning/reference/CONVENTIONS.md`, `CONTRACTS.md`, and the pattern the
+   surrounding code already uses ARE the standard. The baseline is the floor for a
+   repo that documents nothing — never a stick to beat a documented choice with.
+2. **Every smell is a labelled judgement call, never a hard violation.** Name the
+   smell, say why it bites *here*, name the fix, and say whether it is worth doing
+   now. "Present, and fine in context" is a complete finding.
+
+The baseline is Fowler's first twelve smells, each with the refactoring that
+answers it:
+
+| # | Smell | The fix |
+|---|---|---|
+| 1 | Mysterious Name | Rename it — function, variable, field, whatever is lying. |
+| 2 | Duplicated Code | Extract Function over the copies (Pull Up Method if siblings). |
+| 3 | Long Function | Extract Function; Replace Temp with Query; Decompose Conditional. |
+| 4 | Long Parameter List | Preserve Whole Object; Introduce Parameter Object. |
+| 5 | Global Data | Encapsulate Variable — one owner, one mutation site. |
+| 6 | Mutable Data | Encapsulate Variable; Split Variable; Remove Setting Method. |
+| 7 | Divergent Change | Split Phase / Extract Class — one module, one reason to change. |
+| 8 | Shotgun Surgery | Move Function/Field until one change lands in one place. |
+| 9 | Feature Envy | Move Function to the data it keeps reaching across for. |
+| 10 | Data Clumps | Extract Class; Introduce Parameter Object for the recurring group. |
+| 11 | Primitive Obsession | Replace Primitive with Object; Replace Type Code with Subclasses. |
+| 12 | Repeated Switches | Replace Conditional with Polymorphism. |
+
 ## If the step overflows the window
 Reach a green sub-state, commit it, split the step in PROGRESS.md (`<id>a` ✅ +
 new row `<id>b` ⬜ + `NEXT: <id>b`), log a one-line Amendment. Never end red.
+
+## If the runner says `diagnosing` — Phase 1 before any hypothesis
+The runner detects "stuck" from the ledger, never from your own read of how it is
+going, and opens `.plan-runner/diagnostics/<step-id>.md`. It writes the reason and
+the empty headings; you fill them. Diagnosing does not restart or abandon the step —
+it changes the method, not the run.
+
+**The refusal.** Until you can name ONE command you have ALREADY RUN that is
+**red-capable**, **deterministic**, **fast**, and **agent-runnable**, you may not
+state a hypothesis, may not guess at a cause, and may not edit a source file. No
+such command yet → your only permitted work is building one. Paste the exact
+invocation AND its real output into the artifact: a command you did not run cannot
+be proven tight, and a pasted transcript is the proof.
+- **Red-capable** means it asserts the actual symptom and fails *because of it*, and
+  can go green once the bug is fixed. "Runs without erroring" is not red-capable —
+  it cannot distinguish fixed from never-broken, and that distinction is the rule.
+- **Deterministic**: same input, same verdict, every run. **Fast**: seconds, so you
+  can afford to run it after every change. **Agent-runnable**: no owner, no GUI, no
+  device — you can run it yourself, unattended.
+
+Fill all seven sections, in this order: **Repro command + observed output** ·
+**Expected vs actual** · **Minimised case** · **Ranked falsifiable hypotheses** ·
+**Instrumentation tag** · **Confirmed cause** · **Regression test**. Rank
+hypotheses by what a cheap experiment could *kill*, not by what feels likely.
+
+**Tagged instrumentation is a close condition.** Every debug log you add carries one
+unique prefix (record it under *Instrumentation tag*), and the step may not close
+until a grep for that tag comes back empty. The regression test is what survives the
+instrumentation — it fails on the old code and passes on the new.
 
 ## Guardrails
 - **One step, then stop.** Do not roll into the next step — bounded scope is the
