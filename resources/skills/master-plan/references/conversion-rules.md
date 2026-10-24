@@ -56,6 +56,32 @@ A **step** is the unit one fresh agent session executes end-to-end.
    it are written. If steps will run as parallel agents, add a serialized
    "Stage-0" step that lands the contract files first (Schlorm's rule).
 
+## Adaptive effort — the tier rubric (adaptive plans only)
+
+Only when SKILL.md's STEP 1.7 question was answered **on**. Every step heading then carries both
+tags after `[owner-gate: …]`; a plan answered off carries none. Pick the LOWEST tier the step can
+be trusted on:
+
+| Tags | When |
+|---|---|
+| `[model: haiku]` `[effort: low]` | Mechanical transcription only — verbatim copying, renames, a version bump, a table filled from a source that already exists. |
+| `[model: sonnet]` `[effort: medium]` | Research, scraping, and routine edits behind an existing seam — the shape is set and the step fills it in. |
+| `[model: opus]` `[effort: high]` | Ordinary feature work, and EVERY close step (plan close, close-and-convert, park). The answer when unsure. |
+| `[model: fable]` `[effort: high]` or `xhigh` | Novel algorithms, concurrency, security, and any step whose failure is subtle. |
+
+**The binding rule: escalation fires only on a VISIBLE failure.** Plan Runner steps a step up one
+tier (haiku → sonnet → opus → fable) when its turn errors with the retries spent, when it ends with
+the pointer unmoved, or when the step is already stuck — never when it finishes green and wrong.
+So a step where wrong-but-green is plausible (a gate that cannot see the mistake, a judgement
+call, a security or concurrency edge) **never goes below opus**, however easy it looks.
+
+- **Prefer `[S]` below opus.** A lighter model gets a smaller step; an `[M]` tagged haiku or sonnet
+  is a smell — split it or raise the tier.
+- **Owner-gated steps carry both tags too** (every step or none), but they never escalate; tag
+  them by the agent slice they contain.
+- **Effort is independent of tier** — raise it for a light model on a step needing care, e.g.
+  `[model: sonnet]` `[effort: high]`. Codex has no `max`; Plan Runner runs it as `xhigh`.
+
 ## Decomposition procedure (INIT / NEW-PLAN)
 
 1. Extract from the draft: mission, hard constraints, phases, and every

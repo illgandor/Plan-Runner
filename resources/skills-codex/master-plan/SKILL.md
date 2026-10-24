@@ -128,6 +128,27 @@ State the detected mode before acting. All modes end with STEP 4.
    No → omit that block and nothing else changes. Nothing machine-readable stores the
    answer: the presence of the step IS the declaration, and a project that changes its
    mind edits the next plan it authors.
+7. **Ask: should each step pick its own model and effort?** (INIT, every project —
+   NEW-PLAN asks the one-liner below instead.) Verbatim:
+
+   > Should each step pick its own model and effort? With **adaptive effort** on, every step is tagged
+   > with the model and effort it needs — Sonnet for research or routine edits, Opus for normal feature
+   > work, Fable for the hardest steps — and Plan Runner runs each step on its tag instead of your
+   > dropdown. If a step on a lighter model fails, Plan Runner retries it one tier up (Haiku → Sonnet →
+   > Opus → Fable) before it stops for you. **Off** is the default: every step runs on the dropdown,
+   > exactly as today. On or off?
+
+   **In NEW-PLAN ask this one line instead**, the previous plan's state filled in (read it off that
+   plan's step headings — tags present means on):
+
+   > PLAN-23 ran with adaptive effort **off**. On or off for PLAN-24?
+
+   On → record it as a Locked decision in the plan being converted, and put BOTH tags —
+   `[model: …]` `[effort: …]` — on EVERY step heading, after the owner-gate tag, chosen by
+   `references/conversion-rules.md` §Adaptive effort. Off → nothing: no decision, no tags. Nothing
+   machine-readable stores the answer; the tags ARE the declaration, and plan_check FAILs a plan
+   that tags only some of its steps. A chained conversion (item 6) re-asks nothing: it carries the
+   previous plan's answer forward.
 
 ## STEP 2 — Decompose (INIT and NEW-PLAN)
 
@@ -159,6 +180,10 @@ Follow `references/conversion-rules.md` exactly. The short version:
   hand-edited roster is a defect. Solo, relay, and EVERY chained conversion emit
   none of it (a chained plan starts serial). Wording: `conversion-rules.md`
   §Lane proposal.
+- Adaptive project (the STEP 1.7 question answered on): every step heading carries
+  `[model: …]` `[effort: …]` after its owner-gate tag, picked by the rubric in
+  `conversion-rules.md` §Adaptive effort. Escalation fires only on a VISIBLE failure, so a step
+  where wrong-but-green is plausible never goes below opus.
 - Public-facing website: P01-S01 is a password **preview gate** (full site built
   behind it; public sees a holding page). Opening it to the public is its own
   owner-gated launch step at the end. Details: `conversion-rules.md` §Website

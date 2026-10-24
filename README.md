@@ -61,6 +61,15 @@ usage meter and its pause gates work on **both** engines — Claude from `claude
 from the limits it writes to its own session files. Codex has no per-model weekly window, so
 that third bar is hidden there and a plain token counter is shown alongside instead.
 
+## Adaptive effort
+
+A plan can pick each step's model and effort itself: `master-plan` asks when it writes the
+plan, and on "on" tags every step heading (`[model: sonnet]` `[effort: medium]`). **Tags win**
+over the dropdown; an untagged plan runs on the dropdown exactly as before. If a tagged step
+errors out, ends without finishing, or is stuck, Plan Runner retries it **one tier up** — Haiku →
+Sonnet → Opus → Fable (Codex tops out at its Opus equivalent) — before it stops for you.
+Owner-gated steps never escalate.
+
 ## Panel features
 
 Basics: engine + model + permission-mode selector, attach-a-file (hands the agent a path to

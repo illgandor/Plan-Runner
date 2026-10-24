@@ -252,7 +252,11 @@ this is what makes independently-executed steps compose (Lantern Lock).}}
 {{OPTIONAL preamble <=10 lines, ONLY context not already in §1–§6. Governance
 boilerplate is banned here — it lives once in planning/reference/CONVENTIONS.md.}}
 
-#### [P{{NN}}-S01] {{Imperative title}}  `[S|M]`  `[deps: —]`  `[owner-gate: no]`
+#### [P{{NN}}-S01] {{Imperative title}}  `[S|M]`  `[deps: —]`  `[owner-gate: no]`  `[model: {{tier}}]`  `[effort: {{effort}}]`
+{{The model/effort tags are OPTIONAL — adaptive-effort plans only (SKILL.md STEP 1.7); delete both
+otherwise. Both or neither, on every step or on none — plan_check FAILs anything else. tier =
+haiku|sonnet|opus|fable, effort = low|medium|high|xhigh|max; pick by conversion-rules.md
+§Adaptive effort.}}
 **Objective:** {{one sentence — the observable change when this step is done.}}
 **Context:** {{<=3 bullets of pointers (reference §, contract §, prior step IDs).
 Pointers only — restated content is a check failure.}}
