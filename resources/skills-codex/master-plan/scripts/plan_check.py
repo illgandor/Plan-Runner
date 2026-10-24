@@ -315,6 +315,40 @@ def lane_rules(progress_text, plan_text):
     return out
 
 
+# Adaptive-effort tag values, lowest → highest — copied verbatim from CONTRACTS
+# §Adaptive effort. test/plan-check-rules.test.js pins them to src/adaptive.js.
+TIERS = ["haiku", "sonnet", "opus", "fable"]
+EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+
+
+def tag_rules(plan_text):
+    """The three adaptive-effort FAILs (D-108), each from a step's heading line
+    alone — the same one line the runner reads. Returns [(check, detail)]. An
+    untagged plan fires nothing, so every pre-tag LOCKED plan stays green."""
+    out, tagged, total = [], 0, 0
+    for ln in plan_text.splitlines():
+        m = STEP_HEADING_RE.match(ln)
+        if not m:
+            continue
+        sid, total = m.group(1), total + 1
+        found = {name: re.search(rf"\[{name}:\s*([^\]]*?)\s*\]", ln)
+                 for name in ("model", "effort")}
+        if any(found.values()):
+            tagged += 1
+        if bool(found["model"]) != bool(found["effort"]):
+            missing = "model" if found["effort"] else "effort"
+            out.append(("adaptive tags come in pairs",
+                        f"{sid} has no [{missing}: …] — one tag alone is ignored by the runner"))
+        for name, allowed in (("model", TIERS), ("effort", EFFORTS)):
+            if found[name] and found[name].group(1) not in allowed:
+                out.append(("adaptive tag value is known",
+                            f"{sid} [{name}: {found[name].group(1)}] is not one of {allowed}"))
+    if 0 < tagged < total:
+        out.append(("adaptive plan tags every step",
+                    f"{tagged}/{total} step headings carry tags — tag all or none"))
+    return out
+
+
 def step_block(lines, start, end):
     """The block for the step heading at `start`: up to the next heading of ANY
     level (## section, ### milestone), not just the next #### step, trailing
@@ -552,6 +586,30 @@ def selftest():
     checks.append(("the roster line is parsed off the board",
                    [roster_lanes("Drivers: ann · bo — relay.\n"), roster_lanes("x\n")],
                    [["ann", "bo"], []]))
+
+    # The three adaptive-effort FAILs (D-108), each proven loud on its fault and
+    # silent on a fully tagged plan and on an untagged one.
+    def tagged(*tags):
+        return "".join(f"#### [P99-S0{n}] t  `[M]`  `[deps: —]`  `[owner-gate: no]`  {t}\n"
+                       for n, t in enumerate(tags, 1))
+
+    def tag_fired(*tags):
+        return [c for c, _ in tag_rules(tagged(*tags))]
+
+    full = "`[model: sonnet]`  `[effort: medium]`"
+    checks.append(("a fully tagged plan fires nothing",
+                   tag_fired(full, "`[model: fable]`  `[effort: max]`"), []))
+    checks.append(("an untagged plan fires nothing", tag_fired("", ""), []))
+    checks.append(("an unknown model is a FAIL",
+                   tag_fired(full, "`[model: gpt]`  `[effort: high]`"),
+                   ["adaptive tag value is known"]))
+    checks.append(("an unknown effort is a FAIL",
+                   tag_fired(full, "`[model: opus]`  `[effort: High]`"),
+                   ["adaptive tag value is known"]))
+    checks.append(("one tag without the other is a FAIL",
+                   tag_fired(full, "`[model: opus]`"), ["adaptive tags come in pairs"]))
+    checks.append(("a partially tagged plan is a FAIL",
+                   tag_fired(full, ""), ["adaptive plan tags every step"]))
 
     # …and on the REAL intra-plan graph, not just a toy one: every plan in this
     # project schedules every step exactly once. A vendored copy has no plans
@@ -957,6 +1015,8 @@ def check_plans(root: Path, hashes, progress_text):
                     if dep.startswith(f"P{nn}-") and dep > sid:
                         add("FAIL", f"step {sid} no forward dep",
                             f"depends on {dep}, which sorts after it in the same plan")
+        for check, detail in tag_rules(text):
+            add("FAIL", f"{f.name} {check}", detail)
 
         # An ACTIVE plan must be LOCKED. Without this, a DRAFT plan can own the active
         # board and be built step by step with no hash recorded and no immutability

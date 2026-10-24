@@ -41,3 +41,20 @@ test('the shipped checker still carries all four parallel-lane FAIL rules', () =
     assert.ok(body.includes(name), `lane_rules() no longer emits the FAIL "${name}"`);
   }
 });
+
+// P24-S06 (D-108): the three adaptive-effort tag FAILs, sliced out of tag_rules()'s body for the
+// same reason as above — and its TIERS/EFFORTS must equal the runner's, or a plan the checker
+// passes is one the runner silently runs untagged (Python/JS drift).
+const TAG_RULES = ['adaptive tag value is known', 'adaptive tags come in pairs', 'adaptive plan tags every step'];
+
+test('the shipped checker carries the three adaptive-tag FAILs, on the runner\'s own lists', () => {
+  const src = fs.readFileSync(CHECKER, 'utf8');
+  const start = src.indexOf('def tag_rules(');
+  assert.notStrictEqual(start, -1, 'tag_rules() is gone from the shipped checker');
+  const body = src.slice(start, src.indexOf('\ndef ', start + 1));
+  for (const name of TAG_RULES) assert.ok(body.includes(name), `tag_rules() no longer emits "${name}"`);
+  const { TIERS, EFFORTS } = require('../src/adaptive');
+  const list = (name) => JSON.parse((new RegExp(`^${name} = (\\[.*\\])\\r?$`, 'm').exec(src) || [])[1] || 'null');
+  assert.deepStrictEqual(list('TIERS'), TIERS);
+  assert.deepStrictEqual(list('EFFORTS'), EFFORTS);
+});
