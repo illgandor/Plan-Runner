@@ -26,14 +26,16 @@ const tag = (line, name) => (new RegExp(`\\[${name}:\\s*([^\\]\\s]+)\\s*\\]`).ex
 
 // The step NEXT names → its heading's tags, or null (untagged, half-tagged, unknown value, no plan,
 // two plans, no heading, any error). D-106: the heading line is the only thing it parses.
+// `stepId` is the pointer as the runner read it — `P05-S03 — <title>` in a real PROGRESS.md — so
+// only its leading id is used (A-P24-03).
 function stepTags(cwd, stepId) {
   try {
-    const nn = /^P(\d+)-S\w+$/.exec(String(stepId || ''));
+    const nn = /^(P(\d+)-S\d+[a-z]?)(?![\w-])/.exec(String(stepId || ''));
     if (!nn) return null;
     const dir = path.join(cwd, 'planning', 'plans');
-    const plans = fs.readdirSync(dir).filter((f) => f.startsWith(`PLAN-${nn[1]}-`) && f.endsWith('.md'));
+    const plans = fs.readdirSync(dir).filter((f) => f.startsWith(`PLAN-${nn[2]}-`) && f.endsWith('.md'));
     if (plans.length !== 1) return null;
-    const head = `#### [${stepId}]`;
+    const head = `#### [${nn[1]}]`;
     const line = fs.readFileSync(path.join(dir, plans[0]), 'utf8').split(/\r?\n/).find((l) => l.startsWith(head));
     if (!line) return null;
     const model = tag(line, 'model');

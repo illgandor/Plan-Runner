@@ -138,6 +138,17 @@ for (const c of TAGGED) {
   });
 }
 
+// A-P24-03: every real PROGRESS.md writes `NEXT: <id> — <title>`, and the bare `NEXT: P05-S03` above
+// hid that the runner passes the whole pointer to stepTags. The owner's S08b smoke ran both tagged
+// fixture steps on the dropdown because of it.
+test('a titled pointer (the real PROGRESS.md form) still runs the step on its tags', (t) => {
+  const p = tempProject('claude', '  `[model: sonnet]`  `[effort: medium]`');
+  fs.writeFileSync(path.join(p.path, 'PROGRESS.md'), '## ▶ NEXT STEP\nNEXT: P05-S03 — A step\n');
+  const { calls } = driveEveryPath(t, p);
+  assert.equal(calls[0].options.model, 'sonnet');
+  assert.equal(calls[0].options.effort, 'medium');
+});
+
 test('a restart starts at the tier the ledger says it already reached (effort raised to high)', (t) => {
   const p = tempProject('claude', '  `[model: haiku]`  `[effort: low]`',
     [{ kind: 'escalation', stepId: 'P05-S03', from: 'haiku', to: 'opus', reason: 'errored', at: 'x' }]);

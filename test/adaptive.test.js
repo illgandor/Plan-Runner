@@ -25,6 +25,10 @@ test('a tagged heading parses; owner-gate is read from the same line', () => {
     '#### [P05-S04] T  `[S]`  `[deps: —]`  `[owner-gate: yes]`  `[model: opus]`  `[effort: max]`') });
   assert.deepStrictEqual(A.stepTags(cwd, 'P05-S03'), { model: 'sonnet', effort: 'medium', ownerGate: false });
   assert.deepStrictEqual(A.stepTags(cwd, 'P05-S04'), { model: 'opus', effort: 'max', ownerGate: true });
+  // A-P24-03: a real PROGRESS.md pointer carries the title (`NEXT: P05-S03 — <title>`) and the runner
+  // passes it whole. The bare-id-only parse returned null here and every tagged step ran on the dropdown.
+  assert.deepStrictEqual(A.stepTags(cwd, 'P05-S03 — A step'), { model: 'sonnet', effort: 'medium', ownerGate: false });
+  assert.strictEqual(A.stepTags(cwd, 'PLAN COMPLETE'), null);
 });
 
 test('half-tagged, unknown values, wrong case, missing plan/heading, two plans, bad id → null', () => {
