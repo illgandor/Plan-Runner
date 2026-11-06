@@ -132,6 +132,8 @@ details.think summary { cursor: pointer; opacity: .7; }
 .think-body, .tool-body { white-space: pre-wrap; margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--vscode-panel-border); }
 .tool-name { font-family: var(--vscode-editor-font-family, monospace); }
 .tool-target { font-family: var(--vscode-editor-font-family, monospace); opacity: .6; } /* path/command in summary (P04-S03) */
+.tool-meta { opacity: .5; font-variant-numeric: tabular-nums; } /* trailing summary: "3 lines", "+2 −1" (P25-S04) */
+.todo-item.completed { opacity: .6; text-decoration: line-through; } /* TodoWrite checklist (P25-S04) */
 .review-note { margin-top: 6px; font-size: 12px; opacity: .8; font-family: var(--vscode-editor-font-family, monospace); }
 .turn-stats { margin-top: 6px; font-size: 11px; opacity: .55; font-variant-numeric: tabular-nums; } /* per-turn stats (P09-S14) */
 .tool-body .more { display: block; margin-top: 4px; font: inherit; cursor: pointer; padding: 1px 6px;

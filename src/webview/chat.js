@@ -196,17 +196,37 @@
     line.className = 'turn-stats'; line.textContent = parts.join(' · ');
     (cur || log).appendChild(line); scroll();
   }
+  // Readable rows (P25-S04): label/meta come from tool-view.js (§Chat timeline); bodies are per tool.
+  const toolLabel = window.toolLabel || String, toolMeta = window.toolMeta || (() => '');
+  const todoItems = window.todoItems || (() => []);
+  const TODO_GLYPH = { completed: '☑', in_progress: '◐' };   // anything else is ☐
+  const OUTPUT_ONLY = new Set(['Read', 'Grep', 'Glob']);      // no input body — the result is the body
+  function setMeta(d, text) { d.querySelector('.tool-meta').textContent = text; }
   function toolUse(msg) {
     const el = ensureAssistant();
+    const name = msg.name, input = msg.input || {};
     const d = document.createElement('details'); d.className = 'tool running';   // running → ok/err (§Chat timeline)
-    d.innerHTML = `<summary><span class="tool-dot"></span> <span class="tool-name"></span> <span class="tool-target"></span></summary>`;
-    d.querySelector('.tool-name').textContent = msg.name;
+    d.innerHTML = `<summary><span class="tool-dot"></span> <span class="tool-name"></span> <span class="tool-target"></span> <span class="tool-meta"></span></summary>`;
+    d.querySelector('.tool-name').textContent = toolLabel(name);
     // path/command in the collapsed summary (P04-S03); an absolute-looking path is clickable (P09-S12)
     setTarget(d.querySelector('.tool-target'), msg.input);
-    const input = msg.input || {};
-    if (input && (msg.name === 'Edit' || msg.name === 'Write' || msg.name === 'MultiEdit')) {
-      d.appendChild(editDiff(msg.name, input));   // red/green line diff, not raw JSON (P04-S02)
-    } else {
+    d.toolName = name; d.toolInput = input;                     // toolResult needs both for the meta
+    if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
+      d.appendChild(editDiff(name, input));   // red/green line diff, not raw JSON (P04-S02)
+      setMeta(d, toolMeta(name, input));
+    } else if (name === 'TodoWrite') {        // an open checklist, text only
+      const list = document.createElement('div'); list.className = 'tool-body todo-list';
+      todoItems(input).forEach((t) => {
+        const row = document.createElement('div'); row.className = 'todo-item ' + (t.status || '');
+        row.textContent = (TODO_GLYPH[t.status] || '☐') + ' ' + t.text; list.appendChild(row);
+      });
+      d.appendChild(list); d.open = true;
+      setMeta(d, toolMeta(name, input));
+    } else if (name === 'Bash') {             // `$ <full command>`; the output follows on result
+      const body = document.createElement('div'); body.className = 'tool-body tool-cmd';
+      setCapped(body, '$ ' + (input.command || ''));
+      d.appendChild(body);
+    } else if (!OUTPUT_ONLY.has(name)) {
       const body = document.createElement('div'); body.className = 'tool-body';
       setCapped(body, JSON.stringify(input, null, 2));
       d.appendChild(body);
@@ -278,6 +298,8 @@
     if (!d) return;
     d.classList.replace('running', msg.isError ? 'err' : 'ok');   // the dot's colour carries the state (P25-S02)
     if (msg.isError) d.open = true;                              // failures self-expand
+    setMeta(d, toolMeta(d.toolName, d.toolInput, msg.result, msg.isError));
+    if (d.toolName === 'TodoWrite' && !msg.isError) { scroll(); return; }   // the checklist IS the body
     const body = document.createElement('div');
     body.className = 'tool-body';
     setCapped(body, String(msg.result || ''));
