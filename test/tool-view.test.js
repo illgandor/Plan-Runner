@@ -5,10 +5,10 @@ const assert = require('node:assert');
 
 global.window = {};
 require('../src/webview/tool-view.js');
-const { toolLabel, toolMeta, todoItems } = global.window;
+const { toolLabel, toolMeta, todoItems, agentTracker } = global.window;
 
-test('the three names are on window', () => {
-  for (const f of [toolLabel, toolMeta, todoItems]) assert.strictEqual(typeof f, 'function');
+test('the four names are on window', () => {
+  for (const f of [toolLabel, toolMeta, todoItems, agentTracker]) assert.strictEqual(typeof f, 'function');
 });
 
 test('toolLabel: MCP names read as server · tool, plain names unchanged', () => {
@@ -78,4 +78,60 @@ test('todoItems: text and status as given; absent input is an empty list', () =>
   assert.deepStrictEqual(todoItems(undefined), []);
   assert.deepStrictEqual(todoItems({ todos: 'nope' }), []);
   assert.deepStrictEqual(todoItems({ todos: [null] }), [{ text: '', status: undefined }]);
+});
+
+// P25-S05: agentTracker (D-110) — running counts for the activity line.
+const agent = (id, bg) => ({ type: 'tool-use', toolUseId: id, name: 'Agent', input: bg ? { run_in_background: true } : {} });
+const result = (id) => ({ type: 'tool-result', toolUseId: id, result: 'x', isError: false });
+const taskDone = (id) => ({ type: 'task', phase: 'done', taskId: 't', toolUseId: id, status: 'completed' });
+
+test('agentTracker: a foreground agent runs until its tool-result', () => {
+  const t = agentTracker();
+  assert.strictEqual(t.running, 0);
+  t.onEvent(agent('a1'));
+  t.onEvent({ type: 'tool-use', toolUseId: 'r1', name: 'Read', input: {}, parent: 'a1' });   // not an agent
+  t.onEvent({ type: 'tool-use', toolUseId: 'k1', name: 'Task', input: {} });                   // Task counts too
+  assert.strictEqual(t.running, 2);
+  assert.strictEqual(t.background, 0);
+  t.onEvent(result('r1')); t.onEvent(result('a1'));
+  assert.strictEqual(t.running, 1);
+  t.onEvent(result('k1'));
+  assert.strictEqual(t.running, 0);
+});
+
+test('agentTracker: a background agent outlives its tool-result until its task done', () => {
+  const t = agentTracker();
+  t.onEvent(agent('b1', true));
+  t.onEvent(result('b1'));
+  t.onEvent({ type: 'result' });
+  assert.strictEqual(t.running, 1);
+  assert.strictEqual(t.background, 1);
+  t.onEvent({ type: 'task', phase: 'started', taskId: 't', toolUseId: 'b1', description: 'd' });
+  assert.strictEqual(t.running, 1);
+  t.onEvent(taskDone('b1'));
+  assert.strictEqual(t.running, 0);
+  assert.strictEqual(t.background, 0);
+});
+
+test('agentTracker: unmatched task events and foreground task-done change nothing', () => {
+  const t = agentTracker();
+  t.onEvent(agent('a1'));
+  t.onEvent(taskDone('nope')); t.onEvent(taskDone(null)); t.onEvent(taskDone('a1'));
+  assert.strictEqual(t.running, 1);
+  t.onEvent(undefined); t.onEvent({}); t.onEvent({ type: 'tool-use', toolUseId: 'x', name: 'Agent' });
+  assert.strictEqual(t.running, 2);   // absent input is a foreground agent, never a throw
+});
+
+test('agentTracker: init, step-started and done reset it', () => {
+  for (const reset of [{ type: 'init' }, { kind: 'step-started' }, { kind: 'done' }]) {
+    const t = agentTracker();
+    t.onEvent(agent('a1')); t.onEvent(agent('b1', true));
+    assert.strictEqual(t.running, 2);
+    t.onEvent(reset);
+    assert.strictEqual(t.running, 0);
+    assert.strictEqual(t.background, 0);
+  }
+  const a = agentTracker(), b = agentTracker();
+  a.onEvent(agent('a1'));
+  assert.strictEqual(b.running, 0);   // each call is a fresh tracker
 });

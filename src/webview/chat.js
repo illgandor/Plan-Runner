@@ -202,8 +202,22 @@
   const TODO_GLYPH = { completed: '☑', in_progress: '◐' };   // anything else is ☐
   const OUTPUT_ONLY = new Set(['Read', 'Grep', 'Glob']);      // no input body — the result is the body
   function setMeta(d, text) { d.querySelector('.tool-meta').textContent = text; }
+  // Agent rows (P25-S05, §Chat timeline): an Agent/Task row holds its subagent's rows in `.agent-body`,
+  // open while it runs. A background agent keeps running past its tool-result until its task done.
+  const isAgentName = (n) => n === 'Agent' || n === 'Task';
+  const agents = (window.agentTracker || (() => ({ onEvent() {}, running: 0, background: 0 })))();   // counts → S06
+  function agentHost(parent) {   // a parented row's home: its agent's rail, else the turn (unknown parent)
+    const a = parent && toolEls.get(parent);
+    return (a && a.querySelector(':scope > .agent-body')) || ensureAssistant();
+  }
+  function finishAgent(d, isError) {
+    d.classList.remove('running'); d.classList.add(isError ? 'err' : 'ok');
+    d.open = false;
+    setMeta(d, isError ? 'error' : (n => n + (n === 1 ? ' tool use' : ' tool uses'))(
+      d.querySelectorAll(':scope > .agent-body details.tool').length));
+  }
   function toolUse(msg) {
-    const el = ensureAssistant();
+    const el = agentHost(msg.parent);
     const name = msg.name, input = msg.input || {};
     const d = document.createElement('details'); d.className = 'tool running';   // running → ok/err (§Chat timeline)
     d.innerHTML = `<summary><span class="tool-dot"></span> <span class="tool-name"></span> <span class="tool-target"></span> <span class="tool-meta"></span></summary>`;
@@ -211,7 +225,13 @@
     // path/command in the collapsed summary (P04-S03); an absolute-looking path is clickable (P09-S12)
     setTarget(d.querySelector('.tool-target'), msg.input);
     d.toolName = name; d.toolInput = input;                     // toolResult needs both for the meta
-    if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
+    if (isAgentName(name)) {                  // target = description; the prompt is the target's tooltip
+      d.classList.add('agent'); d.bg = input.run_in_background === true;
+      const t = d.querySelector('.tool-target');
+      t.textContent = String(input.description || ''); t.title = String(input.prompt || '');
+      const body = document.createElement('div'); body.className = 'agent-body';
+      d.appendChild(body); d.open = true;
+    } else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
       d.appendChild(editDiff(name, input));   // red/green line diff, not raw JSON (P04-S02)
       setMeta(d, toolMeta(name, input));
     } else if (name === 'TodoWrite') {        // an open checklist, text only
@@ -296,6 +316,13 @@
   function toolResult(msg) {
     const d = toolEls.get(msg.toolUseId);
     if (!d) return;
+    if (d.classList.contains('agent')) {
+      if (d.bg && !msg.isError) setMeta(d, 'running in background');   // stays running until its task done
+      else finishAgent(d, msg.isError);
+      const body = document.createElement('div'); body.className = 'tool-body';
+      setCapped(body, String(msg.result || '')); d.appendChild(body); scroll();
+      return;
+    }
     d.classList.replace('running', msg.isError ? 'err' : 'ok');   // the dot's colour carries the state (P25-S02)
     if (msg.isError) d.open = true;                              // failures self-expand
     setMeta(d, toolMeta(d.toolName, d.toolInput, msg.result, msg.isError));
@@ -313,6 +340,7 @@
     if (channel === 'session:request-cancelled') return deactivateCard(payload.requestId);
     if (channel !== 'session:message') return;
     const m = payload.msg;
+    agents.onEvent(m);
     switch (m.type) {
       case 'init': break; // MCP status lives in the 🔌 button; the resolved model feeds the "default - …" label (host-side, S0094)
       case 'text-delta': appendText(m.text); if (cur) cur.dataset.delta = '1'; break; // mark: streamed live
@@ -324,12 +352,21 @@
       case 'tool-use': toolUse(m); break;
       case 'tool-result': toolResult(m); break;
       case 'review-note': reviewNote(m.text); break;
+      case 'task': {                                 // a background agent's end (P25-S01 event)
+        const d = m.phase === 'done' && toolEls.get(m.toolUseId);
+        if (d && d.bg && d.classList.contains('running')) finishAgent(d, m.status !== 'completed');
+        break;
+      }
       case 'result':
         if (m.contextTokens) { const c = $('ctx'); c.hidden = false; c.textContent = 'ctx ' + fmt(m.contextTokens); }
         if (m.turnTokens) { sessionTokens += m.turnTokens; $('tokval').textContent = fmt(sessionTokens); } // Codex counter
         finalizeMd(cur);                           // backstop: render any bubble that streamed without a trailing assistant-text
         stopThink(); turnStats(m);                 // freeze thinking timer; append the muted stats line (P09-S14)
-        cur = null; toolEls.clear();               // finalize this turn's group
+        cur = null;                                // finalize this turn's group; Codex ids restart per turn,
+        toolEls.forEach((d, id) => {               // so drop every row but a still-running background agent's
+          const a = d.closest('details.agent');
+          if (!(a && a.bg && a.classList.contains('running'))) toolEls.delete(id);
+        });
         break;
       case 'error': stopThink(); bubble('error', (hk() ? 'ACCESS DENIED — ' : '') + (m.message || 'Error')); cur = null; break;
     }
@@ -490,9 +527,9 @@
           || d.state === 'finalizing' || d.state === 'diagnosing'; reflect();
         if (d.state === 'needs-you') { const el = ensureAssistant(); } // keep group open for the answer
         break;
-      case 'step-started': stepChip(hk() ? `▶ BREACHING ${d.step || 'NODE'}` : '▶ ' + (d.step || 'step')); cur = null; break;
+      case 'step-started': agents.onEvent(d); stepChip(hk() ? `▶ BREACHING ${d.step || 'NODE'}` : '▶ ' + (d.step || 'step')); cur = null; break;
       case 'step-done': stepChip(hk() ? `ACCESS GRANTED · ${d.from} → ${d.to}` : `✔ ${d.from} → ${d.to}`); cur = null; break;
-      case 'done': system((hk() ? (d.state === 'error' ? '⚠ ACCESS DENIED — ' : '■ CONNECTION TERMINATED — ') : '■ ')
+      case 'done': agents.onEvent(d); system((hk() ? (d.state === 'error' ? '⚠ ACCESS DENIED — ' : '■ CONNECTION TERMINATED — ') : '■ ')
         + (d.detail || d.state)); running = false; paused = false; stopping = false; resetTokens(); reflect(); break;
       case 'usage': usage(d); break;
       case 'paused': paused = true; reflect(); setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
