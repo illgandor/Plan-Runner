@@ -37,6 +37,15 @@ function toolResultText(content) {
 // Map ONE raw SDK message → zero+ thin UI events (one message can carry several blocks).
 // Ported verbatim from claude-session.js so the webview renders exactly like v2 did.
 function mapMessage(m) {
+  // CONTRACTS §Chat timeline (D-109): a subagent's tool rows carry `parent`; its text, thinking and
+  // stream deltas map to nothing. Top-level events get NO `parent` key, so they stay byte-identical.
+  const parent = m.parent_tool_use_id || null;
+  const tag = (e) => (parent ? { ...e, parent } : e);
+  if (m.type === 'system' && (m.subtype === 'task_started' || m.subtype === 'task_notification')) {
+    const started = m.subtype === 'task_started';
+    return [{ type: 'task', phase: started ? 'started' : 'done', taskId: m.task_id, toolUseId: m.tool_use_id || null,
+      ...(started ? { description: m.description } : { status: m.status }) }];
+  }
   if (m.type === 'system' && m.subtype === 'init') {
     // m.model is the EXACT id the alias/selection resolved to (e.g. 'claude-opus-5-…') — the panel
     // shows it so you can see which version actually ran. Absent on an older CLI → omitted.
@@ -53,6 +62,7 @@ function mapMessage(m) {
       resetsAt: r.resetsAt ?? null, rateLimitType: r.rateLimitType || null }];
   }
   if (m.type === 'stream_event') {
+    if (parent) return [];
     const d = m.event && m.event.delta;
     if (d && d.type === 'text_delta' && d.text) return [{ type: 'text-delta', text: d.text }];
     if (d && d.type === 'thinking_delta' && d.thinking) return [{ type: 'thinking', text: d.thinking }];
@@ -60,16 +70,17 @@ function mapMessage(m) {
   }
   if (m.type === 'assistant') {
     return ((m.message && m.message.content) || []).map((b) => {
+      if (b.type === 'tool_use') return tag({ type: 'tool-use', toolUseId: b.id, name: b.name, input: b.input });
+      if (parent) return null;
       if (b.type === 'text') return { type: 'assistant-text', text: b.text };
       if (b.type === 'thinking') return { type: 'thinking', text: b.thinking };
-      if (b.type === 'tool_use') return { type: 'tool-use', toolUseId: b.id, name: b.name, input: b.input };
       return null;
     }).filter(Boolean);
   }
   if (m.type === 'user') {
     return ((m.message && m.message.content) || []).map((b) => {
       if (b && b.type === 'tool_result') {
-        return { type: 'tool-result', toolUseId: b.tool_use_id, result: toolResultText(b.content), isError: !!b.is_error };
+        return tag({ type: 'tool-result', toolUseId: b.tool_use_id, result: toolResultText(b.content), isError: !!b.is_error });
       }
       return null;
     }).filter(Boolean);
