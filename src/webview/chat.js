@@ -114,11 +114,29 @@
     if (!cur) { cur = bubble('assistant', ''); cur.dataset.streamed = ''; }
     return cur;
   }
+  // Live markdown (P25-S03, §Chat timeline): text accumulates on the current `.md` segment's `raw`
+  // and renders whole at most every 80 ms — raw text never hits the DOM, so no `**` flicker.
+  // Any non-text child (tool, thinking, note) ends the segment; the next text starts a fresh one.
+  // ponytail: whole-segment re-render is O(n²) over one huge reply; render only the tail if it lags.
+  let seg = null, segTimer = null;
+  function renderSeg() {
+    if (segTimer) { clearTimeout(segTimer); segTimer = null; }
+    if (!seg || !seg.dirty) return;
+    seg.dirty = false;
+    if (window.renderMarkdown) { seg.replaceChildren(window.renderMarkdown(seg.raw)); addCopyButtons(seg); }
+    else seg.textContent = seg.raw;
+    scroll();
+  }
   function appendText(t) {
     const el = ensureAssistant();
     el.dataset.streamed = '1';
-    el.appendChild(document.createTextNode(t));
-    scroll();
+    if (!seg || el.lastChild !== seg) {          // a new segment — render the old one first so it's never lost
+      renderSeg();
+      seg = document.createElement('div'); seg.className = 'md'; seg.raw = '';
+      el.appendChild(seg);
+    }
+    seg.raw += t; seg.dirty = true;
+    if (!segTimer) segTimer = setTimeout(renderSeg, 80);
   }
   // Add a copy button to every fenced code block under `root` (P09-S13). Idempotent.
   function addCopyButtons(root) {
@@ -136,23 +154,11 @@
       pre.appendChild(btn);
     });
   }
-  // Re-render a finished assistant bubble's streamed plain text as sanitized markdown (D-015).
-  // Replaces each run of adjacent text nodes in place; leaves think/tool/note children untouched.
+  // Turn end: render the pending segment now (sanitized markdown, D-015) instead of waiting out the
+  // 80 ms timer. Earlier segments were rendered when the next one started, so every segment is done.
   function finalizeMd(el) {
-    if (!el || el.dataset.md || !window.renderMarkdown) return;
-    el.dataset.md = '1';
-    let group = [];
-    const flush = () => {
-      if (!group.length) return;
-      const text = group.map((n) => n.textContent).join('');
-      if (text.trim()) el.insertBefore(window.renderMarkdown(text), group[0]);
-      group.forEach((n) => n.remove());
-      group = [];
-    };
-    Array.from(el.childNodes).forEach((n) => {
-      if (n.nodeType === Node.TEXT_NODE) group.push(n); else flush();
-    });
-    flush();
+    if (!el) return;
+    renderSeg();
     addCopyButtons(el);
   }
   // Thinking summary ticks "Thinking… Ns" live; stopThink() freezes it as "Thought for Ns" (P09-S14, P25-S02).

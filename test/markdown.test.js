@@ -73,3 +73,13 @@ test('a lone pipe line with no --- separator stays a paragraph', () => {
 test('a header row over a plain --- rule (no pipe) is not a table', () => {
   assert.ok(!md('| h |\n---').includes('<table>'));
 });
+
+// Live markdown (P25-S03): the panel renders half-streamed text every 80 ms, so partial input must
+// render sensibly and never throw.
+test('partial: an unterminated fence renders as a code block of what has arrived', () => {
+  assert.strictEqual(md('```js\nx = 1\ny'), '<pre><code>x = 1\ny</code></pre>');
+});
+
+test('partial: a half-typed **bold renders as plain text', () => {
+  assert.strictEqual(md('so **bol'), '<p>so **bol</p>');
+});
