@@ -155,21 +155,22 @@
     flush();
     addCopyButtons(el);
   }
-  // Thinking summary ticks "thinking… Ns" while streaming; stopThink() freezes it at the total (P09-S14).
+  // Thinking summary ticks "Thinking… Ns" live; stopThink() freezes it as "Thought for Ns" (P09-S14, P25-S02).
   let thinkTimer = null, thinkStart = 0, thinkSummary = null;
+  const thinkSecs = () => Math.round((Date.now() - thinkStart) / 1000) + 's';
   function tickThink() {
-    if (thinkSummary) thinkSummary.textContent = 'thinking… ' + Math.round((Date.now() - thinkStart) / 1000) + 's';
+    if (thinkSummary) thinkSummary.textContent = 'Thinking… ' + thinkSecs();
   }
   function stopThink() {
     if (thinkTimer) { clearInterval(thinkTimer); thinkTimer = null; }
-    if (thinkSummary) { tickThink(); thinkSummary = null; }   // final label keeps the total
+    if (thinkSummary) { thinkSummary.textContent = 'Thought for ' + thinkSecs(); thinkSummary = null; }
   }
   function appendThinking(t) {
     const el = ensureAssistant();
     let d = el.querySelector('details.think');
     if (!d) {
       d = document.createElement('details'); d.className = 'think';
-      d.innerHTML = '<summary>thinking…</summary><div class="think-body"></div>';
+      d.innerHTML = '<summary>Thinking…</summary><div class="think-body"></div>';
       el.appendChild(d);
       thinkSummary = d.querySelector('summary'); thinkStart = Date.now();
       tickThink(); thinkTimer = setInterval(tickThink, 1000);
@@ -191,8 +192,8 @@
   }
   function toolUse(msg) {
     const el = ensureAssistant();
-    const d = document.createElement('details'); d.className = 'tool';
-    d.innerHTML = `<summary><span class="tool-status">⏳</span> <span class="tool-name"></span> <span class="tool-target"></span></summary>`;
+    const d = document.createElement('details'); d.className = 'tool running';   // running → ok/err (§Chat timeline)
+    d.innerHTML = `<summary><span class="tool-dot"></span> <span class="tool-name"></span> <span class="tool-target"></span></summary>`;
     d.querySelector('.tool-name').textContent = msg.name;
     // path/command in the collapsed summary (P04-S03); an absolute-looking path is clickable (P09-S12)
     setTarget(d.querySelector('.tool-target'), msg.input);
@@ -269,12 +270,11 @@
   function toolResult(msg) {
     const d = toolEls.get(msg.toolUseId);
     if (!d) return;
-    const status = d.querySelector('.tool-status');
-    if (status) status.textContent = msg.isError ? '⛔' : '✔';   // ⏳ → ✔/⛔ in the collapsed summary (P04-S03)
+    d.classList.replace('running', msg.isError ? 'err' : 'ok');   // the dot's colour carries the state (P25-S02)
     if (msg.isError) d.open = true;                              // failures self-expand
     const body = document.createElement('div');
     body.className = 'tool-body';
-    setCapped(body, (msg.isError ? '⛔ ' : '') + String(msg.result || ''));
+    setCapped(body, String(msg.result || ''));
     d.appendChild(body); scroll();
   }
 
