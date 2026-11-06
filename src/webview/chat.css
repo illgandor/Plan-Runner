@@ -239,6 +239,10 @@ details.think summary { cursor: pointer; opacity: .7; }
   background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
   border-radius: 6px; padding: 8px;
 }
+/* Activity line (P25-S06): above the input while a turn is live or agents run in the background. */
+.activity { font-size: .9em; color: var(--vscode-descriptionForeground); }
+.actstar { color: var(--vscode-textLink-foreground); animation: star-pulse 1.6s ease-in-out infinite; }
+@keyframes star-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
 .composer .row { display: flex; gap: 6px; align-items: center; }
 .composer button { font: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--vscode-panel-border); background: transparent; color: var(--vscode-foreground); }
 .composer button.send { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; margin-left: auto; }

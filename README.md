@@ -75,7 +75,8 @@ Owner-gated steps never escalate.
 Basics: engine + model + permission-mode selector, attach-a-file (hands the agent a path to
 read), live context-token meter, and streamed thinking + tool calls. Assistant output and
 tool results render as **sanitized markdown** — code blocks and **diffs** are colorized with
-the editor's own diff theme; long tool output collapses behind a **show more**.
+the editor's own diff theme; long tool output collapses behind a **show more**. The line above
+the input shows when Claude is working and how many agents a step has running.
 
 ### Run controls
 

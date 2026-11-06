@@ -31,6 +31,7 @@
       <button id="jump" class="jump" hidden>↓ New</button>
       <div id="mcpmenu" class="mcpmenu" hidden></div>
       <div id="settingsmenu" class="mcpmenu" hidden></div>
+      <div id="activity" class="activity" hidden><span id="actstar" class="actstar">✻</span><span id="acttext"></span></div>
       <textarea id="input" placeholder="Message Claude, or answer a step's question…"></textarea>
       <div class="row">
         <button id="attach" title="Attach a file (its path is handed to Claude to read)">📎 Attach</button>
@@ -205,7 +206,25 @@
   // Agent rows (P25-S05, §Chat timeline): an Agent/Task row holds its subagent's rows in `.agent-body`,
   // open while it runs. A background agent keeps running past its tool-result until its task done.
   const isAgentName = (n) => n === 'Agent' || n === 'Task';
-  const agents = (window.agentTracker || (() => ({ onEvent() {}, running: 0, background: 0 })))();   // counts → S06
+  const agents = (window.agentTracker || (() => ({ onEvent() {}, running: 0, background: 0 })))();
+  // Activity line (P25-S06, §Chat timeline): live from a send or the first session message after a
+  // turn end, until result / error / done / needs-you / paused. One 1 s tick, only while it shows.
+  let live = false, armed = true, liveSince = 0, actTick = null;
+  const nAgents = (n) => n + (n === 1 ? ' agent' : ' agents');
+  function setLive(on) {
+    if (on && !live) liveSince = Date.now();
+    live = on; armed = !on; paintActivity();
+  }
+  function paintActivity() {
+    const a = $('activity'), n = agents.running, bg = agents.background;
+    const text = live ? ' Working · ' + Math.floor((Date.now() - liveSince) / 1000) + 's'   // after the ✻ span
+      + (n > 0 ? ' · ' + nAgents(n) + ' running' : '')
+      : bg > 0 ? nAgents(bg) + ' running in background' : '';
+    $('actstar').hidden = !live; $('acttext').textContent = text;
+    a.hidden = !text;
+    if (a.hidden) { clearInterval(actTick); actTick = null; }
+    else if (!actTick) actTick = setInterval(paintActivity, 1000);
+  }
   function agentHost(parent) {   // a parented row's home: its agent's rail, else the turn (unknown parent)
     const a = parent && toolEls.get(parent);
     return (a && a.querySelector(':scope > .agent-body')) || ensureAssistant();
@@ -341,6 +360,9 @@
     if (channel !== 'session:message') return;
     const m = payload.msg;
     agents.onEvent(m);
+    if (m.type === 'result' || m.type === 'error') setLive(false);
+    else if (armed && m.type !== 'task') setLive(true);   // a bg agent's late done is not a new turn
+    else paintActivity();
     switch (m.type) {
       case 'init': break; // MCP status lives in the 🔌 button; the resolved model feeds the "default - …" label (host-side, S0094)
       case 'text-delta': appendText(m.text); if (cur) cur.dataset.delta = '1'; break; // mark: streamed live
@@ -525,14 +547,14 @@
         // so it belongs in this set, or Stop/Pause would vanish the moment a step got stuck.
         setStatus(d); running = d.state === 'running' || d.state === 'needs-you'
           || d.state === 'finalizing' || d.state === 'diagnosing'; reflect();
-        if (d.state === 'needs-you') { const el = ensureAssistant(); } // keep group open for the answer
+        if (d.state === 'needs-you') { const el = ensureAssistant(); setLive(false); } // keep group open for the answer
         break;
-      case 'step-started': agents.onEvent(d); stepChip(hk() ? `▶ BREACHING ${d.step || 'NODE'}` : '▶ ' + (d.step || 'step')); cur = null; break;
+      case 'step-started': agents.onEvent(d); paintActivity(); stepChip(hk() ? `▶ BREACHING ${d.step || 'NODE'}` : '▶ ' + (d.step || 'step')); cur = null; break;
       case 'step-done': stepChip(hk() ? `ACCESS GRANTED · ${d.from} → ${d.to}` : `✔ ${d.from} → ${d.to}`); cur = null; break;
-      case 'done': agents.onEvent(d); system((hk() ? (d.state === 'error' ? '⚠ ACCESS DENIED — ' : '■ CONNECTION TERMINATED — ') : '■ ')
+      case 'done': agents.onEvent(d); setLive(false); system((hk() ? (d.state === 'error' ? '⚠ ACCESS DENIED — ' : '■ CONNECTION TERMINATED — ') : '■ ')
         + (d.detail || d.state)); running = false; paused = false; stopping = false; resetTokens(); reflect(); break;
       case 'usage': usage(d); break;
-      case 'paused': paused = true; reflect(); setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
+      case 'paused': paused = true; setLive(false); reflect(); setStatus({ state: 'paused', detail: d.reason }); break;   // still running; badge on the meter
       case 'resumed': paused = false; reflect(); setStatus({ state: 'running', detail: 'Resumed' }); break;
       case 'info': system(d.text); break;
       case 'splash': splash(d.text); break;
@@ -707,6 +729,7 @@
     '- **MCP** — view, add, and reconnect MCP servers for the active engine.',
     '- **Settings (gear)** — edit the pause limits, poll cadence and run caps in-panel (see below). The presence settings live in VS Code Settings instead.',
     '- **Send** — send a message, or answer a step\'s question.',
+    '- The line above the input shows when Claude is working (`✻ Working · 12s`) and how many agents a step has running.',
     '',
     '## Usage meter & pause limits',
     '',
@@ -991,7 +1014,7 @@
     const ta = $('input'); const text = ta.value.trim();
     if (!text) return;
     stuck = true;   // sending your own message always pins back to the latest
-    bubble('user', text); ta.value = ''; cur = null;
+    bubble('user', text); ta.value = ''; cur = null; setLive(true);
     vscode.postMessage({ type: 'send', text });
   }
   $('jump').onclick = () => scroll(true);   // jump back to latest and re-stick
