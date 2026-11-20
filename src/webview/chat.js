@@ -564,6 +564,7 @@
       // Presence (P10-S06): the element is created on the FIRST message, so an unconfigured
       // workspace — which never sends one — has no presence element in the DOM at all.
       case 'presence': renderPresence(presenceSlot(), d.peers); break;
+      case 'lanes': renderLanes(d); break; // P26-S06: only a laned project is ever sent one
     }
   });
 
@@ -716,6 +717,7 @@
     '- A step won\'t **start** on a checkout that is behind its remote, and won\'t **close** on uncommitted or unpushed work — the loop never builds on top of stranded commits.',
     '- On a two-driver (laned) project, a branch with **no upstream** won\'t start — it names the fix, `git push -u origin <branch>`.',
     '- On a two-driver project, a branch **behind `origin/main`** gets one warning per run (never a block) — pull main if the plan or contracts changed.',
+    "- On a two-driver project, a line per other lane under the status shows that lane's NEXT step, how many steps it has done that your board doesn't show (click to list them), and the plan's combined count — read from their pushed branch, so it is only as fresh as their last push. Read-only; solo projects show nothing.",
     '- At a plan boundary, the close-out session first *audits* the finished plan — spot-checking each step against the repo and filing a gap step for anything marked done but unmet — before closing it.',
     '',
     '## Controls',
@@ -937,6 +939,28 @@
   function presenceSlot() {
     if (!presenceEl) { presenceEl = document.createElement('div'); app.insertBefore(presenceEl, log); }
     return presenceEl;
+  }
+  // Other lanes (P26-S06, §Lane view): one read-only line each plus the combined count, under the
+  // status line. Lane names and pointers come off someone else's branch — textContent only. The
+  // `presence` class is deliberate: same quiet advisory look, same layering.
+  let lanesEl = null;
+  function renderLanes(d) {
+    if (!lanesEl) { lanesEl = document.createElement('div'); lanesEl.className = 'presence lanes'; app.insertBefore(lanesEl, log); }
+    lanesEl.textContent = '';
+    const line = (cls) => lanesEl.appendChild(Object.assign(document.createElement('div'), { className: cls }));
+    for (const l of d.lines || []) {
+      const row = line('lane' + (l.dim ? ' dim' : ''));
+      row.append(l.pre);
+      if (l.steps && l.steps.ids.length) {
+        const ids = Object.assign(document.createElement('div'), { className: 'laneids', hidden: true,
+          textContent: l.steps.ids.join(', ') });
+        const b = Object.assign(document.createElement('button'), { className: 'lanesteps', textContent: l.steps.text });
+        b.setAttribute('aria-expanded', 'false');
+        b.addEventListener('click', () => { ids.hidden = !ids.hidden; b.setAttribute('aria-expanded', String(!ids.hidden)); });
+        row.append(b, l.post, ids);
+      } else row.append(l.steps ? l.steps.text : '', l.post);
+    }
+    if (d.combined) line('lane').textContent = d.combined;
   }
   let lastState;
   function setStatus(d) {

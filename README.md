@@ -43,6 +43,11 @@ Runner then executes those steps one fresh context window at a time until the pl
   refuses to start and names the fix (`git push -u origin <branch>`), so your work can't strand
   where the other driver can't see it; a branch **behind `origin/main`** gets one warning per run
   (never a block) — pull main if the plan or contracts changed. Solo projects skip both.
+- **The other lanes, in the panel.** On a two-driver project, a line per other lane under the
+  status shows that lane's NEXT step, how many steps it has done that your board doesn't show
+  (click to list them), and the plan's combined count — read from their pushed branch, so it is
+  only as fresh as their last push. Read-only; it refreshes on panel open, after each step, and
+  every 10 minutes while idle. Solo projects show nothing.
 - At a **plan boundary** the close-out session first audits the finished plan — spot-checking
   each step against the repo and filing a gap step for anything marked done but unmet.
 - **Bundles the skills it needs.** The `master-plan` + `next-step` skills are shipped in the

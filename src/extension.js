@@ -15,6 +15,7 @@ const skills = require('./skills');
 const updater = require('./updater');
 const { UsageService, resetText } = require('./usage');
 const { startPresence, runState, claimStep } = require('./presence');
+const { laneRefresher, LANE_REFRESH_MS } = require('./lanes');
 
 // Capability lists live in engine.js (single source of truth). caps() gives the SELECTED
 // engine's models/efforts/permissionModes so the dropdowns and validation re-skin per engine.
@@ -171,6 +172,11 @@ function project() {
 }
 function post(msg) { if (view) view.webview.postMessage(msg); }
 
+// P26-S06 (§Lane view): the other lanes, read from their pushed branches. Fire-and-forget — the
+// guard in lanes.js keeps one read in flight and nothing on the run path awaits it.
+const refreshLanesNow = laneRefresher(post);
+function refreshLanes() { const p = project(); if (p && view) refreshLanesNow(p.path, p.lane); }
+
 // Take a stuck claim off the other driver — a COMMAND, never a runner branch (research 03
 // §4.3/§4.4, INV-8). Nothing in the run loop can reach this function; that split is the whole
 // reason unattended running is safe, because the loop can take, release and reclaim its own but
@@ -301,7 +307,7 @@ function ensureRunner() {
     syncPresence(); // new step / new state → heartbeat it (fire-and-forget, never awaited)
   });
   runner.on('step-started', (s) => post({ kind: 'step-started', ...s }));
-  runner.on('step-done', (d) => { post({ kind: 'step-done', ...d }); updateStatusBar(); }); // PROGRESS.md advanced → refresh fraction
+  runner.on('step-done', (d) => { post({ kind: 'step-done', ...d }); updateStatusBar(); refreshLanes(); }); // PROGRESS.md advanced → refresh fraction + lanes
   runner.on('done', (d) => {
     post({ kind: 'done', ...d });
     runningStep = null; updateStatusBar();
@@ -352,6 +358,7 @@ async function onMessage(m) {
       if (usage) postUsage(usage.snapshot()); // paint whatever's been read so far
       if (skillNote) post({ kind: 'info', text: skillNote });
       post({ kind: 'splash', text: p ? `Workspace: ${p.name}${planFrac(p.path)} — NEXT: ${readPointer(p.path, p.lane) || '(none)'}` : 'Open a master-plan project folder to begin.' });
+      refreshLanes(); // panel open (P26-S06)
       break;
     case 'start': {
       if (!p) { const msg = 'Open a project folder first.'; post({ kind: 'info', text: msg }); vscode.window.showWarningMessage(msg); break; }
@@ -533,7 +540,9 @@ class ChatViewProvider {
     // Presence timers exist only while the panel is visible (D-043): hiding it stops them.
     v.onDidChangeVisibility(syncPresence);
     syncPresence();
-    v.onDidDispose(() => { view = null; presence?.stop(); }); // don't post() into a torn-down webview
+    // Other lanes (P26-S06): every 10 minutes while the panel is visible and no run is going.
+    const laneTimer = setInterval(() => { if (v.visible && !runner?.running) refreshLanes(); }, LANE_REFRESH_MS);
+    v.onDidDispose(() => { view = null; presence?.stop(); clearInterval(laneTimer); }); // don't post() into a torn-down webview
   }
 }
 

@@ -93,4 +93,46 @@ async function readLanes(dir, ownLane, { bin = 'git', exec = promisify(execFile)
   return { lanes, combined: { plan: `PLAN-${plan.nn}`, done: all.size, total: plan.total } };
 }
 
-module.exports = { readLanes, laneNames, activePlan, doneSteps, GIT_TIMEOUT_MS };
+// P26-S06: the panel side. Refresh cadence while the panel is visible and no run is going.
+const LANE_REFRESH_MS = 10 * 60 * 1000;
+
+function ago(ts, now) {
+  const m = Math.max(0, Math.round((now - ts) / 60000));
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  if (m < 48 * 60) return Math.round(m / 60) + 'h ago';
+  return Math.round(m / 1440) + 'd ago';
+}
+
+// readLanes' result → §Lane view's panel text. Each line is `pre + steps.text + post` (== `text`);
+// `steps` is split out so the panel can expand it to the ids. The two quiet states are `dim`.
+function laneView({ lanes, combined }, now = Date.now()) {
+  const lines = lanes.map((r) => {
+    if (r.state !== 'found') {
+      const text = `${r.lane} · ${r.state === 'unreadable' ? "couldn't read" : 'no branch found'}`;
+      return { text, dim: true, pre: text, steps: null, post: '' };
+    }
+    const n = r.doneThere.length;
+    const pre = `${r.lane} · NEXT ${r.next || '(none)'} · `;
+    const steps = { text: `${n} step${n === 1 ? '' : 's'} done your board doesn't show`, ids: r.doneThere };
+    const post = ` · updated ${ago(r.updatedAt, now)} (${r.ref})`;
+    return { text: pre + steps.text + post, dim: false, pre, steps, post };
+  });
+  return { lines, combined: combined ? `${combined.plan}: ${combined.done}/${combined.total} across all lanes` : null };
+}
+
+// One refresh in flight at a time: a call while one is live gets that same promise, never a second
+// read. Posts only when there are other lanes — an unlaned project never gets a message. Never
+// rejects, and nothing awaits it on the run path, so a slow git can't delay a step.
+function laneRefresher(post, read = readLanes) {
+  let live = null;
+  return (dir, ownLane) => live || (live = (async () => {
+    try {
+      const r = await read(dir, ownLane);
+      if (r.lanes.length) post({ kind: 'lanes', ...laneView(r) });
+    } catch { /* readLanes never throws; this keeps a panel refresh from ever rejecting */ } finally { live = null; }
+  })());
+}
+
+module.exports = { readLanes, laneNames, activePlan, doneSteps, laneView, laneRefresher, GIT_TIMEOUT_MS,
+  LANE_REFRESH_MS };

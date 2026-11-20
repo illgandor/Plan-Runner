@@ -72,6 +72,11 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-
 .presence { padding: 3px 10px; font-size: 11px; opacity: .7; border-bottom: 1px solid var(--vscode-panel-border); }
 .presence.peer { color: var(--vscode-charts-green, #89d185); opacity: 1; }
 .presence.unknown { opacity: .45; }
+/* Other lanes (P26-S06) ride the presence look; the two quiet states (no branch / couldn't read) dim. */
+.lanes .lane.dim { opacity: .6; }
+.lanes .lanesteps { background: none; border: 0; padding: 0; font: inherit; color: var(--vscode-textLink-foreground);
+  cursor: pointer; text-decoration: underline dotted; }
+.lanes .laneids { padding-left: 12px; font-family: var(--vscode-editor-font-family); }
 
 /* ---- Messages ---- */
 #log { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
