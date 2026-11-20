@@ -24,20 +24,23 @@ const ESCALATE_PROMPT = 'A stronger model is taking over this step. Re-read the 
 
 const tag = (line, name) => (new RegExp(`\\[${name}:\\s*([^\\]\\s]+)\\s*\\]`).exec(line) || [])[1];
 
-// The step NEXT names → its heading's tags, or null (untagged, half-tagged, unknown value, no plan,
-// two plans, no heading, any error). D-106: the heading line is the only thing it parses.
+// The step NEXT names → its heading's tags, or null (untagged, half-tagged, unknown value, no plan
+// holding the heading, any error). D-106: the heading line is the only thing it parses.
 // `stepId` is the pointer as the runner read it — `P05-S03 — <title>` in a real PROGRESS.md — so
-// only its leading id is used (A-P24-03).
-function stepTags(cwd, stepId) {
+// only its leading id is used (A-P24-03). Of the `PLAN-<NN>-*.md` files, only those whose headings
+// hold the step count (P26-S03): two or more → null, and `onClash(files)` is told which.
+function stepTags(cwd, stepId, onClash) {
   try {
     const nn = /^(P(\d+)-S\d+[a-z]?)(?![\w-])/.exec(String(stepId || ''));
     if (!nn) return null;
     const dir = path.join(cwd, 'planning', 'plans');
-    const plans = fs.readdirSync(dir).filter((f) => f.startsWith(`PLAN-${nn[2]}-`) && f.endsWith('.md'));
-    if (plans.length !== 1) return null;
     const head = `#### [${nn[1]}]`;
-    const line = fs.readFileSync(path.join(dir, plans[0]), 'utf8').split(/\r?\n/).find((l) => l.startsWith(head));
-    if (!line) return null;
+    const hits = fs.readdirSync(dir).filter((f) => f.startsWith(`PLAN-${nn[2]}-`) && f.endsWith('.md'))
+      .map((f) => [f, fs.readFileSync(path.join(dir, f), 'utf8').split(/\r?\n/).find((l) => l.startsWith(head))])
+      .filter(([, l]) => l);
+    if (hits.length > 1 && onClash) onClash(hits.map(([f]) => f));
+    if (hits.length !== 1) return null;
+    const line = hits[0][1];
     const model = tag(line, 'model');
     const effort = tag(line, 'effort');
     if (!TIERS.includes(model) || !EFFORTS.includes(effort)) return null;

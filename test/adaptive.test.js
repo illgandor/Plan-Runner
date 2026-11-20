@@ -48,6 +48,25 @@ test('half-tagged, unknown values, wrong case, missing plan/heading, two plans, 
   assert.strictEqual(A.stepTags(path.join(os.tmpdir(), 'no-such-repo-xyz'), 'P05-S03'), null);
 });
 
+// P26-S03 (research 13 §2): only the PLAN-<NN> files whose headings hold the step count.
+test('two same-numbered plan files: the one holding the heading wins; both holding it → null, named', () => {
+  const tagged = plan(`${H}  \`[model: sonnet]\`  \`[effort: low]\``);
+  const want = { model: 'sonnet', effort: 'low', ownerGate: false };
+  const clashes = [];
+  const seen = (files) => clashes.push(files);
+  // heading in one file only → its tags, and no clash is reported (either file order)
+  assert.deepStrictEqual(A.stepTags(repo({ 'PLAN-05-a.md': tagged, 'PLAN-05-b.md': plan('#### [P05-S01] other') }), 'P05-S03', seen), want);
+  assert.deepStrictEqual(A.stepTags(repo({ 'PLAN-05-a.md': plan('#### [P05-S01] other'), 'PLAN-05-b.md': tagged }), 'P05-S03', seen), want);
+  assert.deepStrictEqual(clashes, []);
+  // heading in both → null, and the callback names both files
+  assert.strictEqual(A.stepTags(repo({ 'PLAN-05-a.md': tagged, 'PLAN-05-b.md': tagged }), 'P05-S03', seen), null);
+  assert.deepStrictEqual(clashes.map((f) => [...f].sort()), [['PLAN-05-a.md', 'PLAN-05-b.md']]);
+  // one file → exactly today's result, callback untouched
+  assert.deepStrictEqual(A.stepTags(repo({ 'PLAN-05-x.md': tagged }), 'P05-S03', seen), want);
+  assert.strictEqual(A.stepTags(repo({ 'PLAN-05-x.md': plan(H) }), 'P05-S03', seen), null);
+  assert.strictEqual(clashes.length, 1);
+});
+
 test('resolve: the frozen engine table; Codex max → xhigh, Claude keeps max', () => {
   const r = (model, effort, engine) => A.resolve({ model, effort }, engine);
   assert.deepStrictEqual(r('opus', 'max', 'claude'), { model: 'opus[1m]', effort: 'max' });

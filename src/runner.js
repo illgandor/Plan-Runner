@@ -395,8 +395,10 @@ class Runner extends EventEmitter {
 
   // A tagged heading → its resolved pair, started at the tier the ledger says it already reached
   // (a restart resumes there, not back at its tag). Untagged / unreadable → null = the dropdown.
+  // Two plan files holding the step's heading → untagged, and _runStep's status names them (P26-S03).
   _readAdaptive(stepId) {
-    let tags = adaptive.stepTags(this.project.path, stepId);
+    this._tagClash = null;
+    let tags = adaptive.stepTags(this.project.path, stepId, (files) => { this._tagClash = files; });
     if (!tags) return null;
     const eng = this.project.engine || 'claude';
     const records = tags.ownerGate ? [] : this.readLedger(this.project.path);
@@ -582,7 +584,8 @@ class Runner extends EventEmitter {
     this.emit('status', sig
       ? { state: 'diagnosing', step: stepId, detail: `${stepId} looks stuck (${sig.reason}) — ${sig.detail}` }
       : { state: 'running', step: stepId, detail: `Running ${stepId}` + (this._adaptive
-        ? ` · ${this._adaptive.tags.model} / ${this._adaptive.effort} (adaptive)` : '') });
+        ? ` · ${this._adaptive.tags.model} / ${this._adaptive.effort} (adaptive)` : '')
+        + (this._tagClash ? ` · tags not read: the step is in ${this._tagClash.join(' and ')}` : '') });
     this.emit('step-started', { step: stepId });
     this._startSession(stepId, this._stepPrompt(), null);
   }

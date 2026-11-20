@@ -120,6 +120,20 @@ for (const engine of ['claude', 'codex']) {
   });
 }
 
+// P26-S03: the step's heading in two same-numbered plan files → untagged (the dropdown runs it), and
+// the one Running status line names both files instead of falling back without a word.
+test('heading in two PLAN-05 files: the dropdown runs it and the status names both files', (t) => {
+  const p = tempProject('claude', '  `[model: sonnet]`  `[effort: medium]`');
+  fs.writeFileSync(path.join(p.path, 'planning', 'plans', 'PLAN-05-y.md'), `# PLAN-05
+${HEAD}
+body
+`);
+  const { calls, statuses } = driveEveryPath(t, p);
+  assert.deepEqual(calls[0].options, today(p));
+  assert.ok(statuses.some((s) => s.detail === 'Running P05-S03 · tags not read: the step is in PLAN-05-x.md and PLAN-05-y.md'),
+    statuses.map((s) => s.detail).join(' | '));
+});
+
 const TAGGED = [
   { engine: 'claude', tags: '  `[model: sonnet]`  `[effort: medium]`', model: 'sonnet', effort: 'medium' },
   { engine: 'codex', tags: '  `[model: sonnet]`  `[effort: medium]`', model: 'gpt-5.6-terra', effort: 'medium' },
