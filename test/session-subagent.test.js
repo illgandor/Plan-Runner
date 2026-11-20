@@ -54,7 +54,17 @@ test('task_started and task_notification map to task events with the frozen fiel
 test('an absent tool_use_id is null; other system subtypes map to nothing', () => {
   assert.strictEqual(mapMessage({ type: 'system', subtype: 'task_started', task_id: 'k', description: 'd' })[0].toolUseId, null);
   assert.strictEqual(mapMessage({ type: 'system', subtype: 'task_notification', task_id: 'k', status: 'completed' })[0].toolUseId, null);
-  for (const subtype of ['task_progress', 'task_updated', 'background_tasks_changed', 'something_new']) {
+  for (const subtype of ['task_progress', 'task_updated', 'something_new']) {
     assert.deepStrictEqual(mapMessage({ type: 'system', subtype, task_id: 'k' }), [], subtype);
   }
+});
+
+test('background_tasks_changed maps to background-tasks with every live task id (P26-S01)', () => {
+  // Shape recorded by the P26-S01 probe: a background Bash task rides the same list as an agent.
+  assert.deepStrictEqual(mapMessage({ type: 'system', subtype: 'background_tasks_changed', tasks: [
+    { task_id: 'a1', run_id: 'r', task_type: 'local_agent', description: 'critic' },
+    { task_id: 'b2', task_type: 'local_bash', description: 'sleep', parent_task_id: 'a1' }] }),
+  [{ type: 'background-tasks', taskIds: ['a1', 'b2'] }]);
+  assert.deepStrictEqual(mapMessage({ type: 'system', subtype: 'background_tasks_changed', tasks: [] }),
+    [{ type: 'background-tasks', taskIds: [] }]);
 });

@@ -361,7 +361,7 @@
     const m = payload.msg;
     agents.onEvent(m);
     if (m.type === 'result' || m.type === 'error') setLive(false);
-    else if (armed && m.type !== 'task') setLive(true);   // a bg agent's late done is not a new turn
+    else if (armed && m.type !== 'task' && m.type !== 'background-tasks') setLive(true);   // bg bookkeeping is not a new turn
     else paintActivity();
     switch (m.type) {
       case 'init': break; // MCP status lives in the 🔌 button; the resolved model feeds the "default - …" label (host-side, S0094)

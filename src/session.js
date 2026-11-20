@@ -46,6 +46,11 @@ function mapMessage(m) {
     return [{ type: 'task', phase: started ? 'started' : 'done', taskId: m.task_id, toolUseId: m.tool_use_id || null,
       ...(started ? { description: m.description } : { status: m.status }) }];
   }
+  // CONTRACTS §Background tasks (D-115): every live background task after the change, REPLACE
+  // semantics. The runner keeps the step live on it; the panel renders nothing.
+  if (m.type === 'system' && m.subtype === 'background_tasks_changed') {
+    return [{ type: 'background-tasks', taskIds: (m.tasks || []).map((t) => t.task_id) }];
+  }
   if (m.type === 'system' && m.subtype === 'init') {
     // m.model is the EXACT id the alias/selection resolved to (e.g. 'claude-opus-5-…') — the panel
     // shows it so you can see which version actually ran. Absent on an older CLI → omitted.

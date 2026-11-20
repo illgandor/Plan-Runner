@@ -230,6 +230,9 @@ const RETRY_BACKOFF_MS = 3000; // per-attempt backoff base (× attempt#); overri
 // screen for you. Any session message resets the timer; 0 disables (advance immediately).
 // Restored from the standalone's pty FINALIZE_IDLE_MS (2 min) for the SDK loop.
 const FINALIZE_MS = 120000;
+// §Background tasks idle cap (D-115): waiting on background agents with no session message for
+// this long → the live set is treated as empty, so a lost done event can never wait forever.
+const BG_IDLE_MS = 30 * 60 * 1000;
 // Resume prompt: must NOT re-run finished work (Carryover) — resume re-enters the same
 // SDK session (options.resume), so its full history is already loaded.
 const RESUME_PROMPT =
@@ -276,6 +279,9 @@ class Runner extends EventEmitter {
     this.openDiagnostic = openDiagnostic; // diagnosis artifact writer; overridable in tests
     this._adaptive = null;       // the current step's {tags, model, effort, escalations} when tagged (P24-S04/S05)
     this._lastText = '';         // the turn's last assistant text — where a `NEEDS OWNER:` line lands (P24-S05)
+    this._bgTasks = new Set();   // live background task ids of the current step session (§Background tasks)
+    this.bgIdleMs = BG_IDLE_MS;  // the waiting idle cap; overridable in tests
+    this._bgTimer = null;        // armed only while a turn end is waiting on background tasks
   }
   get id() { return this.project.id; }
   // The provider for the project's engine (default 'claude'); lifecycle calls route here
@@ -340,6 +346,7 @@ class Runner extends EventEmitter {
     clearTimeout(this._finalizeTimer);
     clearTimeout(this._retryTimer);
     clearTimeout(this._stallTimer);
+    clearTimeout(this._bgTimer);
     this.finalizing = false;
     this.running = false;
     this.needsYou = false;
@@ -595,6 +602,8 @@ class Runner extends EventEmitter {
     this.currentStep = stepId;
     this._turnLive = true;
     this._lastText = '';
+    this._bgTasks.clear(); // a new session has no background tasks yet
+    clearTimeout(this._bgTimer);
     const options = { ...this._modelEffort(), permissionMode: this.project.mode, maxTurns: this.project.maxTurns };
     if (resumeId) options.resume = resumeId;
     this._provider.start({ id: this.id, cwd: this.project.path, prompt, options }, { send: this._wrapSend(stepId, gen) });
@@ -614,10 +623,52 @@ class Runner extends EventEmitter {
       if (t === 'rate-limit') return this._recordUsageEvent(payload.msg);
       if (t === 'result') this._lastResult = payload.msg; // keep for the run ledger at step-done
       if (t === 'assistant-text') this._lastText = payload.msg.text || '';
+      this._trackBackground(payload.msg);
+      // §Background tasks safety net: the session is spending usage again, so the gate must see it.
+      if ((t === 'assistant-text' || t === 'tool-use') && !this.paused && !this.finalizing) this._liveAgain(stepId);
       if (t === 'result' || t === 'error') return this._onTurnEnd(stepId, gen, t === 'error');
+      if (this._bgTimer) this._armBgIdle(stepId, gen); // any message while waiting restarts the idle cap
       if (this.finalizing) this._armFinalize(stepId, gen); // late close-out output → keep waiting
       if (this._turnLive) this._armStall(stepId, gen);     // live-turn activity → (re)arm the stall watchdog
     };
+  }
+
+  // §Background tasks "The live set": a background-tasks event REPLACES the set; a task event adds
+  // on started and removes on done — whichever feed arrives. Emptied per session in _startSession.
+  _trackBackground(msg) {
+    if (msg.type === 'background-tasks') this._bgTasks = new Set(msg.taskIds || []);
+    else if (msg.type === 'task' && msg.phase === 'started') this._bgTasks.add(msg.taskId);
+    else if (msg.type === 'task') this._bgTasks.delete(msg.taskId);
+  }
+
+  // The safety net (research 13 §1.3): activity from the current session after the runner thought
+  // the turn ended re-arms the gate, and lifts a needs-you nobody has answered yet.
+  _liveAgain(stepId) {
+    this._turnLive = true;
+    if (!this.needsYou) return;
+    this.needsYou = false;
+    this.emit('status', { state: 'running', step: stepId, detail: `${stepId}: working again` });
+  }
+
+  // The waiting rule (D-115): a clean end with background tasks live leaves the step live — no
+  // escalation, no needs-you. The hand-back turn's own result is judged again by _onTurnEnd.
+  _waitBackground(stepId, gen) {
+    this._turnLive = true;
+    this.emit('status', { state: 'running', step: stepId,
+      detail: `${stepId}: waiting on ${this._bgTasks.size} background agent(s)` });
+    this._armBgIdle(stepId, gen);
+  }
+
+  // The idle cap: no session message for bgIdleMs while waiting → treat the set as empty and judge
+  // the turn end as today (escalate or needs-you).
+  _armBgIdle(stepId, gen) {
+    clearTimeout(this._bgTimer);
+    this._bgTimer = setTimeout(() => {
+      this._bgTimer = null;
+      if (gen !== this._gen || this.paused) return;
+      this._bgTasks.clear();
+      this._onTurnEnd(stepId, gen, false);
+    }, this.bgIdleMs);
   }
 
   // P16-S05: the SDK's rate-limit event → the UsageService as a source-tagged reading, plus ONE
@@ -652,6 +703,7 @@ class Runner extends EventEmitter {
     if (gen !== this._gen || this.paused) return; // paused = interrupt ended the turn; keep the id to resume
     this._turnLive = false;
     clearTimeout(this._stallTimer); // turn ended → the watchdog no longer applies
+    clearTimeout(this._bgTimer); this._bgTimer = null; // this result is judged afresh below
     // Master-plan (PLAN COMPLETE) session ended: tear down for a fresh context, then re-read
     // the pointer via _runNext — it names a new step (continue), 'none' (finish), or still
     // PLAN COMPLETE with _advancedPlan set (finish, no re-run). No settle/git guard here.
@@ -673,6 +725,7 @@ class Runner extends EventEmitter {
       this._recordStep(stepId);
       return this._beginFinalize(stepId, gen); // settle, then advance
     }
+    if (!isError && this._bgTasks.size) return this._waitBackground(stepId, gen);
     // Pointer unchanged. A clean result = Claude is waiting on you. An error tore the session
     // down — retry the step in a fresh session up to the bound before dropping to needs-you.
     if (isError && this._retries < MAX_RETRIES) return this._retryStep(stepId);
@@ -841,6 +894,7 @@ ${this._lastText}`);
     this.paused = true;
     this._turnLive = false;
     clearTimeout(this._stallTimer); // no live turn to watch while paused
+    clearTimeout(this._bgTimer); this._bgTimer = null; // interrupt stops background agents too (P26-S01 probe)
     this._provider.interrupt(this.id);
     this.emit('paused', { reason: this.manualPause
       ? `Paused ${this.currentStep} — click Resume to continue`
