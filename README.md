@@ -39,6 +39,10 @@ Runner then executes those steps one fresh context window at a time until the pl
 - **Never advances past stranded work**: a step closes only when its work is committed (and
   pushed, when there's an upstream), and a step won't *start* on a checkout that is **behind
   its remote** — so it can't build on top of someone else's unpulled commits.
+- **Two-driver (laned) projects** get two more run-start checks: a branch with **no upstream**
+  refuses to start and names the fix (`git push -u origin <branch>`), so your work can't strand
+  where the other driver can't see it; a branch **behind `origin/main`** gets one warning per run
+  (never a block) — pull main if the plan or contracts changed. Solo projects skip both.
 - At a **plan boundary** the close-out session first audits the finished plan — spot-checking
   each step against the repo and filing a gap step for anything marked done but unmet.
 - **Bundles the skills it needs.** The `master-plan` + `next-step` skills are shipped in the

@@ -714,6 +714,8 @@
     '- Each step runs in its own fresh session; a commit + pointer-advance ends it.',
     '- When a step needs you, the status turns to **needs-you** — answer in the composer and the loop continues.',
     '- A step won\'t **start** on a checkout that is behind its remote, and won\'t **close** on uncommitted or unpushed work — the loop never builds on top of stranded commits.',
+    '- On a two-driver (laned) project, a branch with **no upstream** won\'t start — it names the fix, `git push -u origin <branch>`.',
+    '- On a two-driver project, a branch **behind `origin/main`** gets one warning per run (never a block) — pull main if the plan or contracts changed.',
     '- At a plan boundary, the close-out session first *audits* the finished plan — spot-checking each step against the repo and filing a gap step for anything marked done but unmet — before closing it.',
     '',
     '## Controls',

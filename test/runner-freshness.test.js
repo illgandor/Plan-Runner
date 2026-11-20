@@ -114,3 +114,91 @@ test('gitState on a real repo with no upstream reports behind:false', () => {
   assert.strictEqual(s.clean, true);
   assert.strictEqual(s.pushed, true);
 });
+
+// P26-S02 (research 13 §4, D-118): a laned project gets two more run-start checks; solo gets none.
+function lanedProject(step) {
+  const p = tempProject(step);
+  fs.writeFileSync(path.join(p.path, 'PROGRESS.md'), `## ▶ NEXT STEP\nNEXT[tyler]: ${step}\n`);
+  return { ...p, lane: 'tyler' };
+}
+const okClaims = { take: () => ({ verdict: 'taken' }), release: () => {}, holder: () => null };
+
+test('laned + no upstream: refuses to start, naming git push -u origin <branch>', () => {
+  const f = fakeSession();
+  try {
+    const r = new Runner(lanedProject('P01-S01'));
+    r.claims = okClaims;
+    const calls = [];
+    r.gitCheck = (...a) => { calls.push(a); return { clean: true, pushed: true, behind: false,
+      upstream: false, branch: 'lane-tyler', behindMain: 0 }; };
+    const seen = [];
+    r.on('status', (d) => seen.push(d));
+    r.start();
+    assert.strictEqual(f.calls.start, 0, 'no step may start with no upstream on a laned project');
+    assert.deepStrictEqual(calls[0][1], { laned: true });
+    const idle = seen.find((d) => d.state === 'idle');
+    assert.ok(idle, `expected an idle finish, got ${JSON.stringify(seen)}`);
+    assert.match(idle.detail, /git push -u origin lane-tyler/);
+  } finally { f.restore(); }
+});
+
+test('laned + behind origin/main: warns once per run and the step starts', () => {
+  const f = fakeSession();
+  try {
+    const r = new Runner(lanedProject('P01-S01'));
+    r.claims = okClaims;
+    r.gitCheck = () => ({ clean: true, pushed: true, behind: false,
+      upstream: true, branch: 'lane-tyler', behindMain: 3 });
+    const seen = [];
+    r.on('status', (d) => seen.push(d));
+    r.start();
+    assert.strictEqual(f.calls.start, 1, 'behind main must never block');
+    r._runNext(); // a second step boundary in the same run
+    const warns = seen.filter((d) => /main has 3 commits this branch doesn't/.test(d.detail || ''));
+    assert.strictEqual(warns.length, 1, 'the warning fires once per run');
+    assert.match(warns[0].detail, /pull main if the plan or contracts changed/);
+  } finally { f.restore(); }
+});
+
+test('solo: gitCheck called exactly as before, no laned checks, step runs', () => {
+  const project = tempProject('P01-S01');
+  const f = fakeSession();
+  try {
+    const r = new Runner(project);
+    const calls = [];
+    r.gitCheck = (...a) => { calls.push(a); return { clean: true, pushed: true, behind: false }; };
+    const seen = [];
+    r.on('status', (d) => seen.push(d));
+    r.start();
+    assert.deepStrictEqual(calls, [[project.path]], 'solo makes today\'s one call, no laned option');
+    assert.strictEqual(f.calls.start, 1);
+    assert.ok(!seen.some((d) => /push -u origin|main has/.test(d.detail || '')));
+  } finally { f.restore(); }
+});
+
+test('gitState laned on real repos: no upstream, branch name, commits behind origin/main', () => {
+  const { execFileSync } = require('child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-runner-laned-'));
+  const run = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' }).toString().trim();
+  const origin = path.join(root, 'origin');
+  fs.mkdirSync(origin);
+  run(origin, 'init', '-q', '-b', 'main');
+  run(origin, 'config', 'user.email', 't@example.com');
+  run(origin, 'config', 'user.name', 'T');
+  fs.writeFileSync(path.join(origin, 'a.txt'), 'x');
+  run(origin, 'add', '-A');
+  run(origin, 'commit', '-qm', 'init');
+  run(root, 'clone', '-q', origin, 'clone');
+  const clone = path.join(root, 'clone');
+  run(clone, 'checkout', '-qb', 'lane-tyler');
+  for (const n of ['b', 'c']) {
+    fs.writeFileSync(path.join(origin, `${n}.txt`), n);
+    run(origin, 'add', '-A');
+    run(origin, 'commit', '-qm', n);
+  }
+  const s = gitState(clone, { laned: true }); // the one fetch pulls origin/main forward
+  assert.strictEqual(s.upstream, false);
+  assert.strictEqual(s.branch, 'lane-tyler');
+  assert.strictEqual(s.behindMain, 2);
+  assert.strictEqual(s.behind, false, 'no upstream still never blocks the solo freshness guard');
+});

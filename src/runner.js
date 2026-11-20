@@ -30,7 +30,10 @@ const adaptive = require('./adaptive');
 // dirty or the branch is ahead, the session skipped/failed close-out; we must NOT advance
 // past stranded work (that's how P02-S05 got lost). Returns { clean, pushed }; a non-git repo
 // or no-upstream never blocks. Injected on the Runner so tests can stub it.
-function gitState(cwd, { fetch = true } = {}) {
+// `laned` (P26-S02, research 13 §4) adds three answers a two-driver project needs at run start:
+// does the branch have an upstream, its name, and how many commits origin/main has that HEAD
+// lacks (0 when origin/main is absent). Same one fetch; a solo call runs no extra git command.
+function gitState(cwd, { fetch = true, laned = false } = {}) {
   const git = (args, opts) => execFileSync('git', args,
     { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
   try {
@@ -45,13 +48,19 @@ function gitState(cwd, { fetch = true } = {}) {
           { timeout: FETCH_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
       } catch { /* offline / no remote / auth needed → don't block the loop */ }
     }
-    let pushed = true, behind = false;
+    let pushed = true, behind = false, upstream = true;
     try {
       pushed = git(['rev-list', '--count', '@{u}..HEAD']) === '0';
       behind = git(['rev-list', '--count', 'HEAD..@{u}']) !== '0';
-    } catch { pushed = true; behind = false; } // no upstream → n/a
-    return { clean, pushed, behind };
-  } catch { return { clean: true, pushed: true, behind: false }; } // not a git repo → don't block
+    } catch { pushed = true; behind = false; upstream = false; } // no upstream → n/a
+    if (!laned) return { clean, pushed, behind };
+    let behindMain = 0;
+    try { behindMain = Number(git(['rev-list', '--count', 'HEAD..origin/main'])) || 0; } catch { /* no origin/main */ }
+    return { clean, pushed, behind, upstream, branch: git(['rev-parse', '--abbrev-ref', 'HEAD']), behindMain };
+  } catch { // not a git repo → don't block
+    return laned ? { clean: true, pushed: true, behind: false, upstream: true, branch: '', behindMain: 0 }
+      : { clean: true, pushed: true, behind: false };
+  }
 }
 
 const FETCH_TIMEOUT_MS = 20000; // a freshness fetch may not stall the loop on a bad network
@@ -294,6 +303,7 @@ class Runner extends EventEmitter {
     this.stopRequested = false;
     this.stepsRun = 0;
     this._startedAtMs = this.now();
+    this._mainWarned = false;
     this._runNext();
   }
 
@@ -444,13 +454,26 @@ class Runner extends EventEmitter {
     // blocks (gitState reports behind:false), so solo projects pay nothing.
     // Behind AND unpushed = diverged: `--ff-only` REFUSES on a diverged branch, so advising it sends
     // the owner to a command that cannot work. What blocks is unchanged (P14-S05) — only the advice.
-    const fresh = this.gitCheck(this.project.path);
+    // Laned only (P26-S02, D-118) — a solo project makes exactly today's call and nothing more.
+    const laned = isLaned(this.project.path);
+    const fresh = laned ? this.gitCheck(this.project.path, { laned: true }) : this.gitCheck(this.project.path);
     if (fresh.behind) {
       return this._finish('idle', 'Behind the remote — someone else pushed work this clone does not have. '
         + (fresh.pushed
           ? 'Run `git pull --ff-only`, then Start again.'
           : 'This branch has also diverged (it has local commits that are not pushed), so '
             + '`git pull --ff-only` cannot succeed — rebase or merge them yourself, then Start again.'));
+    }
+    // Laned + no upstream: the next-step skill skips its push, so the work would strand on this
+    // machine where the other driver can't see it. Refuse, naming the exact fix.
+    if (laned && fresh.upstream === false)
+      return this._finish('idle', `This branch has no upstream, so the other driver can't see its work — `
+        + `run \`git push -u origin ${fresh.branch || '<branch>'}\`, then Start again.`);
+    // Laned + behind origin/main: a warning, never a block, once per run.
+    if (laned && fresh.behindMain > 0 && !this._mainWarned) {
+      this._mainWarned = true;
+      this.emit('status', { state: 'running', detail: `main has ${fresh.behindMain} commit`
+        + `${fresh.behindMain === 1 ? '' : 's'} this branch doesn't — pull main if the plan or contracts changed` });
     }
     const next = readPointer(this.project.path, this.project.lane);
     // A laned PROGRESS.md read by someone with no lane: readPointer correctly refuses (D-080), but
