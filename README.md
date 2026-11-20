@@ -72,7 +72,9 @@ plan, and on "on" tags every step heading (`[model: sonnet]` `[effort: medium]`)
 over the dropdown; an untagged plan runs on the dropdown exactly as before. If a tagged step
 errors out, ends without finishing, or is stuck, Plan Runner retries it **one tier up** — Haiku →
 Sonnet → Opus → Fable (Codex tops out at its Opus equivalent) — before it stops for you.
-Owner-gated steps never escalate.
+Owner-gated steps never escalate, and neither does a step whose last turn ends on a line starting
+`NEEDS OWNER:` — every step's prompt tells the session that rule, so a deliberate stop waits for
+you instead of costing a turn on the next tier.
 
 ## Panel features
 

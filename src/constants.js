@@ -5,7 +5,9 @@
 const STEP_PROMPT =
   'Use the next-step skill: execute exactly ONE step of this project\'s master plan ' +
   'end-to-end (verify the gate, implement it, commit, update PROGRESS.md, get ' +
-  'plan_check.py to exit 0), then STOP. Do not roll into the following step.';
+  'plan_check.py to exit 0), then STOP. Do not roll into the following step. ' +
+  'If the step genuinely cannot finish without the owner, end your turn with a line starting ' +
+  '`NEEDS OWNER:` and the reason.';
 
 // Codex runs headless (`codex exec`) and tends to end its turn early to "report progress",
 // stalling the loop at needs-you before the step is closed out. This suffix makes it run the

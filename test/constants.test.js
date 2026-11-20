@@ -3,7 +3,7 @@
 // closing plans blind. Stdlib-only (node:test); constants.js is a pure module.
 const test = require('node:test');
 const assert = require('node:assert');
-const { MASTER_PLAN_PROMPT } = require('../src/constants');
+const { MASTER_PLAN_PROMPT, STEP_PROMPT } = require('../src/constants');
 
 test('MASTER_PLAN_PROMPT audits completed steps before closing', () => {
   assert.match(MASTER_PLAN_PROMPT, /audit/i, 'prompt must tell the close-out to audit the plan');
@@ -22,4 +22,9 @@ test('package.json contributes the presence settings, all defaulting to off', ()
     assert.strictEqual(props[key].scope, 'application', `${key} is global, not workspace-shadowable`);
     assert.ok(props[key].description, `${key} needs a description for the Settings UI`);
   }
+});
+
+// P26-S04 (D-116): the first attempt must know the one stop signal, not just an escalated retry.
+test('STEP_PROMPT tells every session the NEEDS OWNER: rule', () => {
+  assert.match(STEP_PROMPT, /line starting `NEEDS OWNER:`/);
 });

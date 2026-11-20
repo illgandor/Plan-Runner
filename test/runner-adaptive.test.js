@@ -27,11 +27,13 @@ function tempProject(engine, tags, ledger, head = HEAD) {
   return { id: dir, path: dir, name: 'tmp', engine, model, effort: 'high', mode: 'auto', maxTurns: 50 };
 }
 
+const QUIT = 'P04-S38 is built and pushed, but it is not closed.\nBoth blind-critic rounds failed, so a third round waits for you.';
+
 // Stub both providers' lifecycle. start() follows `script` (one entry per call: 'error' ends the turn
 // errored, 'live' leaves it streaming, 'idle' ends it cleanly with the pointer unchanged, 'owner' ends
 // it cleanly on a `NEEDS OWNER:` line — in the result text on Claude, in the last assistant text on
-// Codex, whose result carries none — and 'advance' moves NEXT on, then ends cleanly); chat() records
-// and stays live. Every options object either receives is captured in call order.
+// Codex, whose result carries none — 'quit' ends it cleanly on QUIT with no prefix, and 'advance'
+// moves NEXT on, then ends cleanly); chat() records and stays live. Every options object either receives is captured in call order.
 function stubProviders(script) {
   const keys = ['start', 'chat', 'stop', 'interrupt', 'currentSessionId', 'defaultSend'];
   const saved = [session, codex].map((m) => Object.fromEntries(keys.map((k) => [k, m[k]])));
@@ -50,6 +52,10 @@ function stubProviders(script) {
         const line = 'Stopped here.\nNEEDS OWNER: a credential only the owner has';
         hooks.send('session:message', { msg: { type: 'assistant-text', text: mod === codex ? line : 'Stopped here.' } });
         hooks.send('session:message', { msg: { type: 'result', text: mod === codex ? '' : line } });
+      }
+      if (what === 'quit') { // a deliberate stop with no prefix — the P04-S38 field case (research 13 §3)
+        hooks.send('session:message', { msg: { type: 'assistant-text', text: QUIT } });
+        hooks.send('session:message', { msg: { type: 'result', text: mod === codex ? '' : QUIT } });
       }
       if (what === 'advance') {
         fs.writeFileSync(path.join(args.cwd, 'PROGRESS.md'), '## ▶ NEXT STEP\nNEXT: P05-S04\n');
@@ -245,6 +251,13 @@ for (const engine of ['claude', 'codex']) {
     assert.equal(calls[1].prompt, ESCALATE_PROMPT);
     assert.deepEqual(hops(ups), [['sonnet', 'opus', 'unfinished']]);
     assert.equal(r.needsYou, false);
+  });
+
+  test(`unfinished (${engine}): the status says why it stepped up and what the turn last said`, (t) => {
+    const { statuses } = drive(t, tempProject(engine, SONNET), ['quit', 'live']);
+    const flat = QUIT.replace(/\s+/g, ' ');
+    assert.ok(statuses.some((s) => s.detail === 'P05-S03 ended without advancing NEXT and without a NEEDS OWNER: '
+      + `line — stepping up to opus: "${flat.slice(0, 100)}…"`), statuses.map((s) => s.detail).join('\n'));
   });
 
   test(`NEEDS OWNER (${engine}): a turn ending on it is never escalated — needs-you as today`, (t) => {

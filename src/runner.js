@@ -426,8 +426,9 @@ class Runner extends EventEmitter {
     this.appendLedger(this.project.path,
       adaptive.escalationRecord(stepId, a.tags.model, up.model, reason, new Date(this.now()).toISOString()));
     this._adaptive = { tags: up, ...adaptive.resolve(up, eng), escalations: a.escalations + 1 };
-    this.emit('status', { state: 'running', step: stepId,
-      detail: `${stepId} did not finish on ${a.tags.model} — stepping up to ${up.model}` });
+    this.emit('status', { state: 'running', step: stepId, detail: reason === 'unfinished'
+      ? `${stepId} ended without advancing NEXT and without a NEEDS OWNER: line — stepping up to ${up.model}${this._excerpt()}`
+      : `${stepId} did not finish on ${a.tags.model} — stepping up to ${up.model}` });
     return true;
   }
 
@@ -779,6 +780,12 @@ class Runner extends EventEmitter {
   _needsOwner() {
     return /^NEEDS OWNER:/m.test(`${(this._lastResult && this._lastResult.text) || ''}
 ${this._lastText}`);
+  }
+
+  // What the turn last said, for the `unfinished` status (P26-S04): one line, first 100 chars.
+  _excerpt() {
+    const t = ((this._lastResult && this._lastResult.text) || this._lastText || '').replace(/\s+/g, ' ').trim();
+    return t ? `: "${t.slice(0, 100)}${t.length > 100 ? '…' : ''}"` : '';
   }
 
   // Append one run-ledger record for a completed step (§Result event + run ledger, D-017).
