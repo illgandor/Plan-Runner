@@ -235,6 +235,15 @@
     setMeta(d, isError ? 'error' : (n => n + (n === 1 ? ' tool use' : ' tool uses'))(
       d.querySelectorAll(':scope > .agent-body details.tool').length));
   }
+  // The CLI backgrounds agents without run_in_background (A-P26-06): once its list names an agent, that
+  // row is a background row — reopened if its "launched" result already closed it — until its task done.
+  function markBackground() {
+    toolEls.forEach((d, id) => {
+      if (!d.classList.contains('agent') || d.bg || !agents.isBackground || !agents.isBackground(id)) return;
+      d.bg = true; d.classList.remove('ok', 'err'); d.classList.add('running'); d.open = true;
+      setMeta(d, 'running in background');
+    });
+  }
   function toolUse(msg) {
     const el = agentHost(msg.parent);
     const name = msg.name, input = msg.input || {};
@@ -374,7 +383,9 @@
       case 'tool-use': toolUse(m); break;
       case 'tool-result': toolResult(m); break;
       case 'review-note': reviewNote(m.text); break;
+      case 'background-tasks': markBackground(); break;
       case 'task': {                                 // a background agent's end (P25-S01 event)
+        if (m.phase === 'started') markBackground();  // the list may have come before this task id
         const d = m.phase === 'done' && toolEls.get(m.toolUseId);
         if (d && d.bg && d.classList.contains('running')) finishAgent(d, m.status !== 'completed');
         break;

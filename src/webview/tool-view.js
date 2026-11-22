@@ -84,6 +84,8 @@
       },
       get running() { return foreground() + background(); },
       get background() { return background(); },
+      // Is this agent (by toolUseId) in the CLI's background list? Its chat row keeps running (A-P26-06).
+      isBackground(toolUseId) { return !!bgIds && [...bgIds].some((id) => taskTool.get(id) === toolUseId); },
     };
   }
 

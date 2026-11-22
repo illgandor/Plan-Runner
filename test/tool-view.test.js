@@ -177,3 +177,16 @@ test('agentTracker: background Bash tasks are not agents, and step-started forge
   t.onEvent(agent('b1', true));             // no list yet → the flag fallback again
   assert.strictEqual(t.background, 1);
 });
+
+test('agentTracker: isBackground names the agents in the CLI list (their rows keep running)', () => {
+  const t = agentTracker();
+  t.onEvent(agent('a1')); t.onEvent(agent('f1'));
+  assert.strictEqual(t.isBackground('a1'), false);     // no list yet
+  t.onEvent(bgList('k1'));
+  assert.strictEqual(t.isBackground('a1'), false);     // list before its task started
+  t.onEvent(started('k1', 'a1'));
+  assert.strictEqual(t.isBackground('a1'), true);
+  assert.strictEqual(t.isBackground('f1'), false);
+  t.onEvent(bgList());
+  assert.strictEqual(t.isBackground('a1'), false);
+});
