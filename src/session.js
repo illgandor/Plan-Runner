@@ -47,9 +47,12 @@ function mapMessage(m) {
       ...(started ? { description: m.description } : { status: m.status }) }];
   }
   // CONTRACTS §Background tasks (D-115): every live background task after the change, REPLACE
-  // semantics. The runner keeps the step live on it; the panel renders nothing.
+  // semantics. The runner keeps the step live on all of them; the panel's agent count reads only
+  // `agentIds` (the local_agent ones — the list also holds background Bash tasks).
   if (m.type === 'system' && m.subtype === 'background_tasks_changed') {
-    return [{ type: 'background-tasks', taskIds: (m.tasks || []).map((t) => t.task_id) }];
+    const tasks = m.tasks || [];
+    return [{ type: 'background-tasks', taskIds: tasks.map((t) => t.task_id),
+      agentIds: tasks.filter((t) => t.task_type === 'local_agent').map((t) => t.task_id) }];
   }
   if (m.type === 'system' && m.subtype === 'init') {
     // m.model is the EXACT id the alias/selection resolved to (e.g. 'claude-opus-5-…') — the panel

@@ -55,18 +55,35 @@
   // input.run_in_background, until the task `done` event whose toolUseId matches. onEvent takes a
   // mapped session message ({type}) or a panel message ({kind}); init/step-started/done reset it.
   const isAgent = (name) => name === 'Agent' || name === 'Task';
+  // The CLI backgrounds agents whether or not `run_in_background` was set (research 13 §1.5), and
+  // such an agent's tool-result is only "launched". So once the CLI's own background list has been
+  // seen (a background-tasks event, REPLACE), it alone is the background count; the input flag is
+  // the fallback for a CLI that never sends one. Foreground agents never appear in that list.
   function agentTracker() {
-    const live = new Map();   // agent toolUseId → background?
+    const live = new Map();     // agent toolUseId → launched with run_in_background?
+    const taskTool = new Map(); // task id → its agent's toolUseId (from task started)
+    let bgIds = null;           // the CLI's live background agent task ids; null until one arrives
+    const background = () => {
+      if (bgIds) return bgIds.size;
+      let n = 0; live.forEach((bg) => { if (bg) n++; }); return n;
+    };
+    const foreground = () => {
+      const inList = new Set([...(bgIds || [])].map((id) => taskTool.get(id)));
+      let n = 0; live.forEach((bg, id) => { if (!bg && !inList.has(id)) n++; }); return n;
+    };
     return {
       onEvent(e) {
         const t = e && (e.type || e.kind);
-        if (t === 'init' || t === 'step-started' || t === 'done') live.clear();
+        if (t === 'step-started' || t === 'done') { live.clear(); taskTool.clear(); bgIds = null; }
+        else if (t === 'init') live.clear();   // a hand-back turn opens with init; the CLI's list outlives it
+        else if (t === 'background-tasks') bgIds = new Set(e.agentIds || []);
         else if (t === 'tool-use' && isAgent(e.name)) live.set(e.toolUseId, !!(e.input && e.input.run_in_background === true));
         else if (t === 'tool-result' && live.get(e.toolUseId) === false) live.delete(e.toolUseId);
+        else if (t === 'task' && e.phase === 'started' && e.toolUseId) taskTool.set(e.taskId, e.toolUseId);
         else if (t === 'task' && e.phase === 'done' && live.get(e.toolUseId) === true) live.delete(e.toolUseId);
       },
-      get running() { return live.size; },
-      get background() { let n = 0; live.forEach((bg) => { if (bg) n++; }); return n; },
+      get running() { return foreground() + background(); },
+      get background() { return background(); },
     };
   }
 

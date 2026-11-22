@@ -135,3 +135,45 @@ test('agentTracker: init, step-started and done reset it', () => {
   a.onEvent(agent('a1'));
   assert.strictEqual(b.running, 0);   // each call is a fresh tracker
 });
+
+// The CLI backgrounds agents with no run_in_background flag (research 13 §1.5): its own list wins.
+const started = (task, id) => ({ type: 'task', phase: 'started', taskId: task, toolUseId: id, description: 'd' });
+const bgList = (...agentIds) => ({ type: 'background-tasks', taskIds: agentIds, agentIds });
+
+test('agentTracker: an agent the CLI backgrounds without the flag still counts, through hand-backs', () => {
+  const t = agentTracker();
+  t.onEvent(agent('a1')); t.onEvent(started('k1', 'a1'));
+  t.onEvent(result('a1'));                  // only "launched"
+  t.onEvent(bgList('k1'));
+  t.onEvent({ type: 'result' });
+  assert.strictEqual(t.running, 1);
+  assert.strictEqual(t.background, 1);
+  t.onEvent({ type: 'init' });             // a hand-back turn opens
+  assert.strictEqual(t.background, 1);
+  t.onEvent(bgList());
+  assert.strictEqual(t.running, 0);
+  assert.strictEqual(t.background, 0);
+});
+
+test('agentTracker: no double count when the list arrives before the launch result', () => {
+  const t = agentTracker();
+  t.onEvent(agent('a1')); t.onEvent(started('k1', 'a1')); t.onEvent(bgList('k1'));
+  assert.strictEqual(t.running, 1);
+  t.onEvent(result('a1'));
+  assert.strictEqual(t.running, 1);
+  t.onEvent(agent('f1'));                   // a foreground agent beside it
+  assert.strictEqual(t.running, 2);
+  assert.strictEqual(t.background, 1);
+});
+
+test('agentTracker: background Bash tasks are not agents, and step-started forgets the list', () => {
+  const t = agentTracker();
+  t.onEvent({ type: 'background-tasks', taskIds: ['x1'], agentIds: [] });
+  assert.strictEqual(t.background, 0);
+  t.onEvent(bgList('k1', 'k2'));
+  assert.strictEqual(t.background, 2);
+  t.onEvent({ kind: 'step-started' });
+  assert.strictEqual(t.running, 0);
+  t.onEvent(agent('b1', true));             // no list yet → the flag fallback again
+  assert.strictEqual(t.background, 1);
+});

@@ -64,7 +64,7 @@ test('background_tasks_changed maps to background-tasks with every live task id 
   assert.deepStrictEqual(mapMessage({ type: 'system', subtype: 'background_tasks_changed', tasks: [
     { task_id: 'a1', run_id: 'r', task_type: 'local_agent', description: 'critic' },
     { task_id: 'b2', task_type: 'local_bash', description: 'sleep', parent_task_id: 'a1' }] }),
-  [{ type: 'background-tasks', taskIds: ['a1', 'b2'] }]);
+  [{ type: 'background-tasks', taskIds: ['a1', 'b2'], agentIds: ['a1'] }]);
   assert.deepStrictEqual(mapMessage({ type: 'system', subtype: 'background_tasks_changed', tasks: [] }),
-    [{ type: 'background-tasks', taskIds: [] }]);
+    [{ type: 'background-tasks', taskIds: [], agentIds: [] }]);
 });
